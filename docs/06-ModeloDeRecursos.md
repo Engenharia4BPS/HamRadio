@@ -1,6 +1,6 @@
-# GADX – Modelo de Recursos
+# GADX Vector – Modelo de Recursos
 
-> Documento reservado para definir como equipamentos e capacidades das estações serão representados no GADX.
+> Documento reservado para definir como equipamentos e capacidades das estações serão representados no **GADX Vector**.
 
 ## Recursos iniciais
 - Rádio.
