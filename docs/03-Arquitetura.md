@@ -1,31 +1,31 @@
-# GADX – Arquitetura
+# GADX Vector – Arquitetura
 
 ## Visão Geral
-Arquitetura modular baseada em Gateway + Bridge, com protocolo interno próprio e adapters para integração com tecnologias externas.
+Arquitetura modular baseada em **Vector Gateway + Vector Client**, com protocolo interno próprio e adapters para integração com tecnologias externas.
 
 ## Componentes
 
-### GADX Gateway
+### Vector Gateway
 - Instalado em cada estação.
 - Gerencia autenticação.
 - Gerencia autorização e sessões.
 - Publica recursos disponíveis.
 - Mantém o estado dos recursos.
-- Comunica-se com o Hamlib e outros backends futuros.
+- Comunica-se com o Hamlib e outros backends futuros por adapters.
 
-### GADX Bridge
+### Vector Client
 - Executado no computador do operador.
 - Interface Web para seleção de estação e recursos.
 - Serviço local para funções dependentes do sistema operacional.
-- Porta COM virtual.
+- Porta COM virtual quando necessária.
 - Emulação CAT.
-- Tradução entre CAT e Protocolo GADX.
+- Tradução entre CAT e Vector Protocol.
 
-### Protocolo GADX
-Camada de comunicação entre Bridge e Gateway, independente do Hamlib, fabricante de rádio, protocolo CAT ou sistema operacional.
+### Vector Protocol
+Camada de comunicação entre Vector Client e Vector Gateway, independente do Hamlib, fabricante de rádio, protocolo CAT ou sistema operacional.
 
-### Adapter Hamlib
-Responsável por traduzir operações e estados do modelo GADX para a interface do `rigctld`.
+### Hamlib Adapter
+Responsável por traduzir operações e estados do modelo do GADX Vector para a interface do `rigctld`.
 
 ## Fluxo Lógico
 
@@ -36,16 +36,16 @@ N1MM / DXLog
 COM Virtual / CAT
      |
      v
-GADX Bridge
+Vector Client
      |
      v
-Protocolo GADX
+Vector Protocol
      |
      v
-GADX Gateway
+Vector Gateway
      |
      v
-Adapter Hamlib
+Hamlib Adapter
      |
      v
 rigctld
@@ -55,7 +55,7 @@ Rádio físico
 ```
 
 ## Multiestação
-Cada site possui seu próprio GADX Gateway. O operador escolhe no GADX Bridge qual site deseja utilizar e, em seguida, seleciona um recurso disponível.
+Cada site possui seu próprio **Vector Gateway**. O operador escolhe no **Vector Client** qual site deseja utilizar e, em seguida, seleciona um recurso disponível.
 
 Sites iniciais previstos:
 - Guatupê
@@ -66,7 +66,7 @@ Sites iniciais previstos:
 ## Multiplataforma
 As camadas dependentes do sistema operacional devem permanecer isoladas.
 
-A interface Web, o Protocolo GADX, os modelos de domínio e a comunicação com o Gateway devem ser independentes do sistema operacional. A implementação específica de COM virtual ou equivalente fica encapsulada em adapters locais do Bridge.
+A interface Web, o Vector Protocol, os modelos de domínio e a comunicação com o Vector Gateway devem ser independentes do sistema operacional. A implementação específica de COM virtual ou equivalente fica encapsulada em adapters locais do Vector Client.
 
 ## Princípios
 - Separação entre interface, protocolo, regras de negócio e hardware.
