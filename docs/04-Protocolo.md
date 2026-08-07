@@ -1,6 +1,6 @@
-# GADX – Protocolo
+# GADX Vector – Protocolo
 
-> Documento reservado para a especificação do Protocolo GADX entre Bridge e Gateway.
+> Documento reservado para a especificação do **Vector Protocol**, protocolo interno entre Vector Client e Vector Gateway.
 
 ## A definir
 - Transporte.
@@ -16,3 +16,6 @@
 - Eventos de estado.
 - Erros e códigos de retorno.
 - Reconexão e recuperação de sessão.
+
+## Princípio
+O Vector Protocol deve permanecer independente do Hamlib, de fabricantes de rádio e de protocolos CAT específicos.
