@@ -1,5 +1,9 @@
 # GADX Vector
 
+<p align="center">
+  <img src="assets/branding/logo-v0.1.png" alt="GADX Vector" width="720">
+</p>
+
 **GADX Vector** é a plataforma de automação e operação remota de estações de rádio amador desenvolvida pelo **Grupo Araucária de DX (GADX)**.
 
 ## O nome Vector
@@ -25,6 +29,13 @@
 - `emulator/` — emulação CAT e testes de compatibilidade com softwares de rádio.
 - `tools/` — ferramentas auxiliares de desenvolvimento e diagnóstico.
 - `tests/` — testes automatizados e cenários de integração.
+- `assets/branding/` — identidade visual, logo, paleta, tipografia e diretrizes de marca.
+
+## Identidade visual
+
+A imagem [`assets/branding/logo-v0.1.png`](assets/branding/logo-v0.1.png) é a **logo conceitual v0.1** do GADX Vector e serve como referência para a evolução da identidade visual do produto.
+
+Os documentos de identidade visual ficam em [`assets/branding/`](assets/branding/).
 
 ## Documentação
 
