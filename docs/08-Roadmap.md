@@ -1,11 +1,11 @@
-# GADX – Roadmap
+# GADX Vector – Roadmap
 
 ## Fase 0 — Fundação
 - Escopo.
 - Premissas.
 - Arquitetura.
-- Protocolo.
-- API.
+- Vector Protocol.
+- Vector API.
 
 ## Fase 1 — Prova de conceito
 - Emulação CAT mínima.
@@ -19,14 +19,14 @@
 - PTT.
 - Sincronização de estado.
 
-## Fase 3 — Gateway
+## Fase 3 — Vector Gateway
 - Sessões.
 - Autenticação.
 - Aprovação local.
 - Multi-rádio.
 
 ## Fase 4 — Multiestação
-- Seleção de site.
+- Seleção de site no Vector Client.
 - Guatupê.
 - Purunã.
 - Casa 68.
