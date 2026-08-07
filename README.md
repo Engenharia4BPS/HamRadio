@@ -1,12 +1,26 @@
-# GADX / HamRadio
+# GADX Vector
 
-Repositório privado para desenvolvimento da plataforma GADX (Grupo Araucária DX), destinada ao gerenciamento e operação remota de estações de rádio amador.
+**GADX Vector** é a plataforma de automação e operação remota de estações de rádio amador desenvolvida pelo **Grupo Araucária de DX (GADX)**.
 
-## Estrutura
+## O nome Vector
 
-- `docs/` — documentação funcional e arquitetural.
-- `gateway/` — implementação do GADX Gateway.
-- `bridge/` — implementação do GADX Bridge.
+**Vector** remete imediatamente a **direção**, **azimute**, **trajetória** e **precisão**, conceitos muito presentes no radioamadorismo.
+
+1. Também remete à engenharia — vetores, direção e magnitude — o que combina muito com o perfil do projeto.
+2. É curto, fácil de pronunciar em português e inglês.
+3. Funciona muito bem como marca de produto.
+
+## Estrutura do produto
+
+- **Vector Gateway** — serviço instalado em cada site e responsável pelos recursos locais, sessões, autorização e integração com equipamentos.
+- **Vector Client** — componente executado no computador do operador, oferecendo interface Web e integração local com N1MM, DXLog e outros softwares.
+- **Vector Protocol** — protocolo interno de comunicação entre Client e Gateway, independente do Hamlib e de protocolos CAT específicos.
+
+## Estrutura do repositório
+
+- `docs/` — documentação funcional e arquitetural do GADX Vector.
+- `vector-gateway/` — implementação do Vector Gateway.
+- `vector-client/` — implementação do Vector Client.
 - `shared/` — modelos, contratos e componentes compartilhados.
 - `emulator/` — emulação CAT e testes de compatibilidade com softwares de rádio.
 - `tools/` — ferramentas auxiliares de desenvolvimento e diagnóstico.
