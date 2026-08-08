@@ -26,6 +26,8 @@ class RadioState:
     rx_vfo: int = 0  # 0=A, 1=B
     tx_vfo: int = 0  # 0=A, 1=B
     ptt: bool = False
+    auto_information: int = 0  # TS-2000: 0=OFF, 2=extended AI ON
+    af_gain_main: int = 128  # 000..255
 
     @property
     def split(self) -> bool:
@@ -44,9 +46,9 @@ class TS2000Emulator:
     """Minimal Kenwood TS-2000 CAT emulator for the GADX Vector SPIKE.
 
     This is deliberately not a full TS-2000 implementation. It implements
-    only the subset required to begin compatibility testing with N1MM/DXLog.
-    Unknown commands are surfaced to the caller so real logger traffic can be
-    captured and the compatibility matrix can be expanded empirically.
+    only the subset observed/required during compatibility testing with
+    N1MM/DXLog. Unknown commands are surfaced to the caller so logger traffic
+    can expand the compatibility matrix empirically.
     """
 
     MODEL_ID = "019"
@@ -57,11 +59,6 @@ class TS2000Emulator:
         self.unsupported_commands: List[str] = []
 
     def feed(self, data: str) -> List[str]:
-        """Feed arbitrary serial text and return zero or more CAT responses.
-
-        CAT commands are terminated by ';'. The method tolerates fragmented
-        serial reads and multiple commands in one read.
-        """
         self._rx_buffer += data
         responses: List[str] = []
 
@@ -79,13 +76,11 @@ class TS2000Emulator:
 
     def handle_command(self, raw: str) -> Optional[str]:
         command = raw.upper()
-
         if len(command) < 2:
             return "?;"
 
         prefix = command[:2]
         param = command[2:]
-
         handlers = {
             "ID": self._id,
             "FA": self._fa,
@@ -95,6 +90,9 @@ class TS2000Emulator:
             "FT": self._ft,
             "TX": self._tx,
             "RX": self._rx,
+            "IF": self._if,
+            "AI": self._ai,
+            "AG": self._ag,
         }
 
         handler = handlers.get(prefix)
@@ -127,14 +125,11 @@ class TS2000Emulator:
     def _md(self, param: str) -> str:
         if not param:
             return f"MD{self.state.mode_code};"
-
         if len(param) != 1:
             raise ValueError("invalid MD parameter")
-
         code = int(param)
         if code not in MODE_CODES:
             raise ValueError("unsupported mode")
-
         self.state.mode_code = code
         return ""
 
@@ -151,7 +146,6 @@ class TS2000Emulator:
         return ""
 
     def _tx(self, param: str) -> str:
-        # TS-2000 TX is primarily a set command. Some software may send TX0.
         if param not in ("", "0"):
             raise ValueError("unsupported TX parameter")
         self.state.ptt = True
@@ -162,6 +156,57 @@ class TS2000Emulator:
             raise ValueError("RX has no parameter in this spike")
         self.state.ptt = False
         return ""
+
+    def _ai(self, param: str) -> str:
+        # TS-2000 supports AI0 (OFF) and AI2 (extended AI ON).
+        if not param:
+            return f"AI{self.state.auto_information};"
+        if param not in ("0", "2"):
+            raise ValueError("TS-2000 supports AI0 or AI2")
+        self.state.auto_information = int(param)
+        return ""
+
+    def _ag(self, param: str) -> str:
+        # AG P1 P2: P1=0 main transceiver, P2=000..255.
+        # N1MM was observed polling with AG0;.
+        if param == "0":
+            return f"AG0{self.state.af_gain_main:03d};"
+        if len(param) == 4 and param[0] == "0" and param[1:].isdigit():
+            gain = int(param[1:])
+            if not 0 <= gain <= 255:
+                raise ValueError("AF gain out of range")
+            self.state.af_gain_main = gain
+            return ""
+        raise ValueError("unsupported AG parameter")
+
+    def _if(self, param: str) -> str:
+        if param:
+            raise ValueError("IF is read-only")
+
+        # TS-2000 IF answer fields (Kenwood PC command table):
+        # frequency(11), step(4), RIT/XIT offset(6), RIT(1), XIT(1),
+        # memory bank/channel(3), RX/TX(1), mode(1), VFO(1), scan(1),
+        # split(1), tone state(1), tone number(2), shift(1).
+        # For the spike, unsupported ancillary features are reported inactive.
+        frequency = self.state.active_rx_frequency_hz
+        step = "0000"
+        rit_xit = "+00000"
+        rit = "0"
+        xit = "0"
+        memory = "000"
+        rx_tx = "1" if self.state.ptt else "0"
+        mode = str(self.state.mode_code)
+        vfo = str(self.state.rx_vfo)
+        scan = "0"
+        split = "1" if self.state.split else "0"
+        tone_state = "0"
+        tone_number = "00"
+        shift = "0"
+
+        return (
+            f"IF{frequency:011d}{step}{rit_xit}{rit}{xit}{memory}"
+            f"{rx_tx}{mode}{vfo}{scan}{split}{tone_state}{tone_number}{shift};"
+        )
 
     @staticmethod
     def _parse_frequency(param: str) -> int:
@@ -186,5 +231,6 @@ class TS2000Emulator:
             f"RX=VFO-{'B' if self.state.rx_vfo else 'A'} "
             f"TX=VFO-{'B' if self.state.tx_vfo else 'A'} "
             f"MODE={mode} PTT={'ON' if self.state.ptt else 'OFF'} "
-            f"SPLIT={'ON' if self.state.split else 'OFF'}"
+            f"SPLIT={'ON' if self.state.split else 'OFF'} "
+            f"AI={self.state.auto_information} AG0={self.state.af_gain_main}"
         )
