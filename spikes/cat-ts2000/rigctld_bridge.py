@@ -25,6 +25,9 @@ HAMLIB_TO_TS2000 = {
     "RTTYR": "FSK-R", "PKTLSB": "LSB", "PKTUSB": "USB", "PKTFM": "FM",
 }
 
+SERIAL_LINES = {"DTR", "RTS", "NONE"}
+PTT_LINES = SERIAL_LINES | {"RIGCTLD"}
+
 
 @dataclass
 class RigSnapshot:
@@ -126,7 +129,7 @@ def _read_ini(path: str) -> Dict[str, object]:
         return {}
 
     cfg = configparser.ConfigParser()
-    cfg.read(ini_path, encoding="utf-8")
+    cfg.read(ini_path, encoding="utf-8-sig")
     if "bridge" not in cfg:
         raise ValueError(f"INI file {ini_path} must contain a [bridge] section")
 
@@ -137,6 +140,8 @@ def _read_ini(path: str) -> Dict[str, object]:
         "port": "port",
         "keying_port": "keying_port",
         "radio_keying_port": "radio_keying_port",
+        "ptt_line": "ptt_line",
+        "cw_line": "cw_line",
         "rig_host": "rig_host",
         "log_level": "log_level",
     }
@@ -178,6 +183,8 @@ def parse_args() -> argparse.Namespace:
         "keying_baud": 19200,
         "radio_keying_port": None,
         "radio_keying_baud": 9600,
+        "ptt_line": "RIGCTLD",
+        "cw_line": "RTS",
         "allow_cw": False,
         "rig_host": "127.0.0.1",
         "rig_port": 4532,
@@ -195,11 +202,16 @@ def parse_args() -> argparse.Namespace:
     p.set_defaults(**defaults)
     p.add_argument("--port", help="TS-2000 CAT side, e.g. COM18")
     p.add_argument("--baud", type=int)
-    p.add_argument("--keying-port", help="N1MM keying receive side, e.g. COM32")
+    p.add_argument("--keying-port", help="Logger keying receive side, e.g. COM102")
     p.add_argument("--keying-baud", type=int)
-    p.add_argument("--radio-keying-port", help="Physical radio keying port, e.g. IC-7760 USB(B) COM22")
+    p.add_argument("--radio-keying-port", help="Physical radio/interface keying COM port")
     p.add_argument("--radio-keying-baud", type=int)
-    p.add_argument("--allow-cw", action=argparse.BooleanOptionalAction, help="Mirror CW key DOWN/UP to physical radio RTS")
+    p.add_argument("--ptt-line", choices=sorted(PTT_LINES), type=str.upper,
+                   help="Physical PTT output: RIGCTLD, DTR, RTS or NONE")
+    p.add_argument("--cw-line", choices=sorted(SERIAL_LINES), type=str.upper,
+                   help="Physical CW output: DTR, RTS or NONE")
+    p.add_argument("--allow-cw", action=argparse.BooleanOptionalAction,
+                   help="Mirror CW key DOWN/UP to configured physical serial line")
     p.add_argument("--rig-host")
     p.add_argument("--rig-port", type=int)
     p.add_argument("--poll-ms", type=int)
@@ -208,8 +220,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = p.parse_args()
 
+    args.ptt_line = str(args.ptt_line).upper()
+    args.cw_line = str(args.cw_line).upper()
+
     if not args.port:
         p.error("CAT port is required. Set port= in bridge.ini or use --port COMxx")
+    if args.ptt_line not in PTT_LINES:
+        p.error("ptt_line must be RIGCTLD, DTR, RTS or NONE")
+    if args.cw_line not in SERIAL_LINES:
+        p.error("cw_line must be DTR, RTS or NONE")
+    if args.ptt_line in SERIAL_LINES - {"NONE"} and args.ptt_line == args.cw_line:
+        p.error("ptt_line and cw_line cannot use the same physical serial line")
     return args
 
 
@@ -228,10 +249,13 @@ def keying_worker(
 ) -> None:
     try:
         with serial.Serial(port_name, baud, timeout=0, write_timeout=None) as p:
+            # com0com mapping used by the logger side:
+            # logger DTR -> bridge DSR/DCD = PTT
+            # logger RTS -> bridge CTS     = CW
             last_ptt, last_cw = bool(p.dsr or p.cd), bool(p.cts)
             events.put(KeyingEvent("PTT", last_ptt, time.monotonic()))
             events.put(KeyingEvent("CW", last_cw, time.monotonic()))
-            LOG.info("N1MM keying input ready on %s: DTR->DSR/DCD=PTT, RTS->CTS=CW", port_name)
+            LOG.info("Logger keying input ready on %s: DTR->DSR/DCD=PTT, RTS->CTS=CW", port_name)
             while not stop.is_set():
                 now = time.monotonic()
                 ptt, cw = bool(p.dsr or p.cd), bool(p.cts)
@@ -247,6 +271,18 @@ def keying_worker(
         events.put(KeyingEvent("ERROR", False, time.monotonic()))
 
 
+def set_serial_line(port: serial.Serial, line: str, enabled: bool) -> None:
+    line = line.upper()
+    if line == "DTR":
+        port.dtr = enabled
+    elif line == "RTS":
+        port.rts = enabled
+    elif line == "NONE":
+        return
+    else:
+        raise ValueError(f"Unsupported serial control line: {line}")
+
+
 def main() -> int:
     try:
         args = parse_args()
@@ -260,13 +296,15 @@ def main() -> int:
     )
     LOG.info("Configuration file: %s", args.config)
     LOG.info(
-        "Resolved configuration: CAT=%s@%d KEY-IN=%s@%d KEY-OUT=%s@%d RIG=%s:%d",
+        "Resolved configuration: CAT=%s@%d KEY-IN=%s@%d KEY-OUT=%s@%d PTT=%s CW=%s RIG=%s:%d",
         args.port,
         args.baud,
         args.keying_port or "disabled",
         args.keying_baud,
         args.radio_keying_port or "disabled",
         args.radio_keying_baud,
+        args.ptt_line,
+        args.cw_line,
         args.rig_host,
         args.rig_port,
     )
@@ -274,8 +312,11 @@ def main() -> int:
     if args.allow_ptt and not args.allow_write:
         LOG.error("allow_ptt requires allow_write=true (or --allow-write)")
         return 2
-    if args.allow_cw and (not args.keying_port or not args.radio_keying_port):
-        LOG.error("allow_cw requires keying_port and radio_keying_port")
+    if args.allow_cw and (not args.keying_port or args.cw_line != "NONE") and not args.radio_keying_port:
+        LOG.error("CW serial output requires radio_keying_port")
+        return 2
+    if args.allow_ptt and args.ptt_line in {"DTR", "RTS"} and not args.radio_keying_port:
+        LOG.error("Serial PTT output requires radio_keying_port")
         return 2
 
     radio, rig = TS2000Emulator(), RigctldClient(args.rig_host, args.rig_port)
@@ -294,8 +335,16 @@ def main() -> int:
         if not args.allow_ptt:
             LOG.warning("Blocked physical PTT %s", "ON" if desired else "OFF")
             return
-        LOG.warning("BRIDGE -> PHYSICAL RADIO PTT %s", "ON" if desired else "OFF")
-        rig.set_ptt(desired)
+
+        LOG.warning("BRIDGE -> PHYSICAL RADIO PTT %s via %s", "ON" if desired else "OFF", args.ptt_line)
+        if args.ptt_line == "RIGCTLD":
+            rig.set_ptt(desired)
+        elif args.ptt_line in {"DTR", "RTS"}:
+            if radio_key_port is None:
+                raise RuntimeError("Serial PTT requested but physical keying port is not open")
+            set_serial_line(radio_key_port, args.ptt_line, desired)
+        elif args.ptt_line == "NONE":
+            LOG.debug("Physical PTT output disabled by configuration")
         physical_ptt_asserted = desired
 
     try:
@@ -305,7 +354,11 @@ def main() -> int:
         last_snapshot = initial
         LOG.info("Initial physical radio: %d Hz %s", initial.frequency_hz, initial.mode)
 
-        if args.radio_keying_port:
+        needs_serial_keying = (
+            args.cw_line in {"DTR", "RTS"}
+            or args.ptt_line in {"DTR", "RTS"}
+        )
+        if needs_serial_keying:
             radio_key_port = serial.Serial(
                 args.radio_keying_port,
                 args.radio_keying_baud,
@@ -315,9 +368,11 @@ def main() -> int:
             radio_key_port.rts = False
             radio_key_port.dtr = False
             LOG.info(
-                "Physical keying output ready on %s @ %d; RTS=CW",
+                "Physical keying output ready on %s @ %d; PTT=%s CW=%s",
                 args.radio_keying_port,
                 args.radio_keying_baud,
+                args.ptt_line,
+                args.cw_line,
             )
 
         if args.keying_port:
@@ -356,12 +411,15 @@ def main() -> int:
                             )
                             LOG.info("CW OFF (pulse %.1f ms)", pulse)
                             cw_asserted_at = None
-                        if args.allow_cw and radio_key_port is not None:
-                            radio_key_port.rts = event.enabled
+                        if args.allow_cw and args.cw_line != "NONE":
+                            if radio_key_port is None:
+                                raise RuntimeError("CW output requested but physical keying port is not open")
+                            set_serial_line(radio_key_port, args.cw_line, event.enabled)
                             LOG.debug(
-                                "KEYING MIRROR: COM input CW=%d -> %s RTS=%d",
+                                "KEYING MIRROR: COM input CW=%d -> %s %s=%d",
                                 int(event.enabled),
                                 args.radio_keying_port,
+                                args.cw_line,
                                 int(event.enabled),
                             )
 
@@ -421,18 +479,18 @@ def main() -> int:
             thread.join(timeout=1.0)
         if radio_key_port is not None:
             try:
-                LOG.warning("Fail-safe shutdown: forcing CW KEY UP (RTS OFF)")
+                LOG.warning("Fail-safe shutdown: forcing serial keying outputs OFF")
                 radio_key_port.rts = False
                 radio_key_port.dtr = False
             except serial.SerialException as exc:
-                LOG.error("Fail-safe CW OFF failed: %s", exc)
+                LOG.error("Fail-safe serial keying OFF failed: %s", exc)
             try:
                 radio_key_port.close()
             except serial.SerialException:
                 pass
-        if args.allow_ptt and physical_ptt_asserted:
+        if args.allow_ptt and physical_ptt_asserted and args.ptt_line == "RIGCTLD":
             try:
-                LOG.warning("Fail-safe shutdown: forcing physical PTT OFF")
+                LOG.warning("Fail-safe shutdown: forcing physical PTT OFF via rigctld")
                 rig.set_ptt(False)
             except Exception as exc:
                 LOG.error("Fail-safe PTT OFF failed: %s", exc)
