@@ -24,9 +24,7 @@ function Find-Setupc {
 
     $candidates = @(
         "$env:ProgramFiles\com0com\setupc.exe",
-        "$env:ProgramFiles(x86)\com0com\setupc.exe",
-        "$env:ProgramFiles\com0com\setup.exe",
-        "$env:ProgramFiles(x86)\com0com\setup.exe"
+        "${env:ProgramFiles(x86)}\com0com\setupc.exe"
     )
     foreach ($candidate in $candidates) {
         if ($candidate -and (Test-Path $candidate)) { return $candidate }
@@ -74,7 +72,7 @@ function Write-BridgeIni {
         [string]$HostName,
         [int]$HostPort
     )
-    $content = @"
+    @"
 [bridge]
 port = COM$VectorCat
 baud = 19200
@@ -94,8 +92,7 @@ allow_ptt = true
 allow_cw = true
 
 log_level = INFO
-"@
-    Set-Content -Path $Path -Value $content -Encoding UTF8
+"@ | Set-Content -Path $Path -Encoding UTF8
 }
 
 Assert-Administrator
@@ -104,13 +101,13 @@ Write-Host "com0com: $setupc" -ForegroundColor DarkGray
 
 $busy = Get-BusyComNumbers -Setupc $setupc
 
-# Portas expostas ao logger: por requisito de compatibilidade, sempre <= COM30.
+# Requisito: as duas portas apresentadas ao logger devem ficar entre COM10 e COM30.
 $loggerCat = Find-FreeCom -Busy $busy -Min 10 -Max 30
 [void]$busy.Add($loggerCat)
 $loggerKey = Find-FreeCom -Busy $busy -Min 10 -Max 30 -Exclude @($loggerCat)
 [void]$busy.Add($loggerKey)
 
-# Portas internas podem ser altas; o logger nunca precisa enxerga-las.
+# As pontas internas do Vector podem usar numeros altos.
 $vectorCat = Find-FreeCom -Busy $busy -Min 100 -Max 199
 [void]$busy.Add($vectorCat)
 $vectorKey = Find-FreeCom -Busy $busy -Min 100 -Max 199 -Exclude @($vectorCat)
@@ -129,11 +126,10 @@ Install-ComPair -Setupc $setupc -Left $loggerKey -Right $vectorKey
 $programData = Join-Path $env:ProgramData "GADXVector"
 $logDir = Join-Path $programData "logs"
 New-Item -ItemType Directory -Force -Path $programData, $logDir | Out-Null
+
 $iniPath = Join-Path $programData "bridge.ini"
 Write-BridgeIni -Path $iniPath -VectorCat $vectorCat -VectorKeying $vectorKey -RadioKey $RadioKeyingPort -RadioKeyBaud $RadioKeyingBaud -HostName $RigHost -HostPort $RigPort
-Write-Host "bridge.ini gerado em $iniPath" -ForegroundColor Green
 
-# Guarda as portas apresentadas ao usuario para futuras ferramentas/upgrade.
 @"
 [logger]
 cat_port = COM$loggerCat
@@ -142,22 +138,37 @@ radio_model = TS-2000
 cat_baud = 19200
 "@ | Set-Content -Path (Join-Path $programData "logger.ini") -Encoding UTF8
 
+Write-Host "bridge.ini gerado em $iniPath" -ForegroundColor Green
+
 if (-not $SkipService) {
-    Write-Host "Instalando dependencias do servico..." -ForegroundColor Cyan
-    & python -m pip install pyserial pywin32
+    Write-Host "Preparando runtime do servico..." -ForegroundColor Cyan
+
+    $appDir = Join-Path $env:ProgramFiles "GADX Vector"
+    $serviceDir = Join-Path $appDir "service"
+    New-Item -ItemType Directory -Force -Path $appDir, $serviceDir | Out-Null
+
+    Copy-Item (Join-Path $RepoRoot "rigctld_bridge.py") (Join-Path $appDir "rigctld_bridge.py") -Force
+    Copy-Item (Join-Path $RepoRoot "ts2000.py") (Join-Path $appDir "ts2000.py") -Force
+    Copy-Item (Join-Path $RepoRoot "service\vector_bridge_service.py") (Join-Path $serviceDir "vector_bridge_service.py") -Force
+
+    & python -m pip install --upgrade pyserial pywin32
     if ($LASTEXITCODE -ne 0) { throw "Falha instalando pyserial/pywin32." }
 
-    $serviceScript = Join-Path $RepoRoot "service\vector_bridge_service.py"
-    if (-not (Test-Path $serviceScript)) { throw "Nao encontrei $serviceScript" }
+    # A documentacao do pywin32 recomenda o post-install global/elevado para servicos.
+    & python -m pywin32_postinstall -install
+    if ($LASTEXITCODE -ne 0) { throw "Falha no pywin32_postinstall." }
 
-    # Remove versao anterior, se existir. Erros aqui sao aceitaveis na primeira instalacao.
+    $serviceScript = Join-Path $serviceDir "vector_bridge_service.py"
+
+    # Remove uma instalacao anterior do wrapper, se houver.
     & python $serviceScript stop 2>$null | Out-Null
     & python $serviceScript remove 2>$null | Out-Null
 
-    & python $serviceScript --startup delayed install
+    & python $serviceScript install
     if ($LASTEXITCODE -ne 0) { throw "Falha instalando o servico GADXVectorBridge." }
 
-    # Reinicio automatico em falhas reais do processo.
+    # Configuracao nativa do Windows: delayed-auto + tres tentativas de reinicio.
+    & sc.exe config GADXVectorBridge start= delayed-auto | Out-Null
     & sc.exe failure GADXVectorBridge reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
     & sc.exe failureflag GADXVectorBridge 1 | Out-Null
 
@@ -165,18 +176,18 @@ if (-not $SkipService) {
     if ($LASTEXITCODE -ne 0) { throw "Servico instalado, mas nao iniciou. Consulte Event Viewer e $logDir." }
 }
 
-Write-Host "";
+Write-Host ""
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host " GADX Vector - setup concluido" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "Configure o logger assim:"
-Write-Host "  Radio: Kenwood TS-2000"
-Write-Host "  CAT:   COM$loggerCat @ 19200 8N1"
+Write-Host "  Radio:  Kenwood TS-2000"
+Write-Host "  CAT:    COM$loggerCat @ 19200 8N1"
 Write-Host "  CW/PTT: COM$loggerKey"
-Write-Host "  DTR: PTT"
-Write-Host "  RTS: CW"
+Write-Host "  DTR:    PTT"
+Write-Host "  RTS:    CW"
 Write-Host ""
-Write-Host "Portas internas do Vector: COM$vectorCat (CAT), COM$vectorKey (keying)"
+Write-Host "Vector interno: COM$vectorCat (CAT), COM$vectorKey (keying)"
 Write-Host "Config: $iniPath"
 Write-Host "Logs:   $logDir"
 if (-not $SkipService) { Write-Host "Servico: GADX Vector Bridge (Automatic Delayed Start)" }
