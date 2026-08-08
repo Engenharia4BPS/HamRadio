@@ -1,5 +1,5 @@
 param(
-    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")),
+    [string]$RepoRoot = "",
     [string]$SetupcPath = "",
     [string]$RadioKeyingPort = "COM22",
     [int]$RadioKeyingBaud = 9600,
@@ -21,7 +21,6 @@ function Assert-Administrator {
 function Find-Setupc {
     param([string]$Preferred)
     if ($Preferred -and (Test-Path $Preferred)) { return (Resolve-Path $Preferred).Path }
-
     $candidates = @(
         "$env:ProgramFiles\com0com\setupc.exe",
         "${env:ProgramFiles(x86)}\com0com\setupc.exe"
@@ -29,46 +28,70 @@ function Find-Setupc {
     foreach ($candidate in $candidates) {
         if ($candidate -and (Test-Path $candidate)) { return $candidate }
     }
-    throw "Nao encontrei setupc.exe do com0com. Instale o com0com Signed ou informe -SetupcPath C:\caminho\setupc.exe"
+    throw "Nao encontrei setupc.exe do com0com. Instale o com0com Signed ou informe -SetupcPath."
+}
+
+function Resolve-RuntimeRoot {
+    param([string]$Preferred)
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if ($Preferred) { $candidates.Add($Preferred) }
+    $candidates.Add($PSScriptRoot)
+    $candidates.Add((Join-Path $PSScriptRoot ".."))
+    $candidates.Add((Get-Location).Path)
+
+    foreach ($candidate in $candidates) {
+        if (-not $candidate) { continue }
+        try { $resolved = (Resolve-Path $candidate -ErrorAction Stop).Path } catch { continue }
+        $bridge = Join-Path $resolved "rigctld_bridge.py"
+        $ts = Join-Path $resolved "ts2000.py"
+        $svc1 = Join-Path $resolved "service\vector_bridge_service.py"
+        $svc2 = Join-Path $resolved "vector_bridge_service.py"
+        if ((Test-Path $bridge) -and (Test-Path $ts) -and ((Test-Path $svc1) -or (Test-Path $svc2))) {
+            return $resolved
+        }
+    }
+    throw @"
+Nao encontrei o runtime completo do Vector.
+
+O setup precisa encontrar juntos:
+  rigctld_bridge.py
+  ts2000.py
+  service\vector_bridge_service.py  (ou vector_bridge_service.py)
+
+Baixe a pasta completa spikes\cat-ts2000 do GitHub ou use:
+  .\setup.ps1 -RepoRoot C:\caminho\para\cat-ts2000
+
+Nenhuma nova porta COM sera criada enquanto esse pre-flight falhar.
+"@
 }
 
 function Invoke-Setupc {
-    param(
-        [string]$Setupc,
-        [string[]]$Arguments,
-        [switch]$Quiet
-    )
-
-    # com0com resolves com0com.inf relative to the current directory.
+    param([string]$Setupc, [string[]]$Arguments, [switch]$Quiet)
     $setupDir = Split-Path -Parent $Setupc
     Push-Location $setupDir
     try {
-        # IMPORTANT: capture native stdout/stderr locally. If we let it flow into
-        # the PowerShell pipeline, a caller assigning this function's return value
-        # receives output lines PLUS the integer exit code as Object[], causing a
-        # successful setupc exit 0 to be misread as failure.
         $output = @(& $Setupc @Arguments 2>&1)
         $exitCode = [int]$LASTEXITCODE
-        if (-not $Quiet) {
-            foreach ($line in $output) { Write-Host $line }
-        }
+        if (-not $Quiet) { foreach ($line in $output) { Write-Host $line } }
         return $exitCode
     }
-    finally {
-        Pop-Location
-    }
+    finally { Pop-Location }
+}
+
+function Get-SetupcList {
+    param([string]$Setupc)
+    $setupDir = Split-Path -Parent $Setupc
+    Push-Location $setupDir
+    try { return @(& $Setupc --silent list 2>&1) }
+    finally { Pop-Location }
 }
 
 function Get-BusyComNumbers {
     param([string]$Setupc)
     $setupDir = Split-Path -Parent $Setupc
     Push-Location $setupDir
-    try {
-        $output = & $Setupc --silent busynames 'COM?*' 2>&1
-    }
-    finally {
-        Pop-Location
-    }
+    try { $output = & $Setupc --silent busynames 'COM?*' 2>&1 }
+    finally { Pop-Location }
     $busy = [System.Collections.Generic.HashSet[int]]::new()
     foreach ($line in $output) {
         if ($line -match '^\s*COM(\d+)\s*$') { [void]$busy.Add([int]$Matches[1]) }
@@ -76,13 +99,18 @@ function Get-BusyComNumbers {
     return ,$busy
 }
 
+function Test-ComPairExists {
+    param([string[]]$ListOutput, [int]$Left, [int]$Right)
+    $leftFound = $false; $rightFound = $false
+    foreach ($line in $ListOutput) {
+        if ($line -match "PortName=COM$Left(?:\s|$)|RealPortName=COM$Left(?:\s|$)") { $leftFound = $true }
+        if ($line -match "PortName=COM$Right(?:\s|$)|RealPortName=COM$Right(?:\s|$)") { $rightFound = $true }
+    }
+    return ($leftFound -and $rightFound)
+}
+
 function Find-FreeCom {
-    param(
-        [System.Collections.Generic.HashSet[int]]$Busy,
-        [int]$Min,
-        [int]$Max,
-        [int[]]$Exclude = @()
-    )
+    param([System.Collections.Generic.HashSet[int]]$Busy, [int]$Min, [int]$Max, [int[]]$Exclude = @())
     for ($n = $Min; $n -le $Max; $n++) {
         if (($Exclude -notcontains $n) -and (-not $Busy.Contains($n))) { return $n }
     }
@@ -92,21 +120,22 @@ function Find-FreeCom {
 function Install-ComPair {
     param([string]$Setupc, [int]$Left, [int]$Right)
     Write-Host "Criando par COM$Left <-> COM$Right ..." -ForegroundColor Cyan
-    $exitCode = Invoke-Setupc -Setupc $Setupc -Arguments @('--wait', '30', 'install', "PortName=COM$Left", "PortName=COM$Right")
+    $exitCode = Invoke-Setupc -Setupc $Setupc -Arguments @('--wait','30','install',"PortName=COM$Left","PortName=COM$Right")
     if ($exitCode -ne 0) { throw "Falha ao criar par COM$Left/COM$Right (exit $exitCode)." }
 }
 
+function Get-IniComNumber {
+    param([string]$Path, [string]$Key)
+    if (-not (Test-Path $Path)) { return $null }
+    foreach ($line in Get-Content $Path) {
+        if ($line -match "^\s*$Key\s*=\s*COM(\d+)\s*$") { return [int]$Matches[1] }
+    }
+    return $null
+}
+
 function Write-BridgeIni {
-    param(
-        [string]$Path,
-        [int]$VectorCat,
-        [int]$VectorKeying,
-        [string]$RadioKey,
-        [int]$RadioKeyBaud,
-        [string]$HostName,
-        [int]$HostPort
-    )
-    @"
+    param([string]$Path,[int]$VectorCat,[int]$VectorKeying,[string]$RadioKey,[int]$RadioKeyBaud,[string]$HostName,[int]$HostPort)
+@"
 [bridge]
 port = COM$VectorCat
 baud = 19200
@@ -133,30 +162,61 @@ Assert-Administrator
 $setupc = Find-Setupc -Preferred $SetupcPath
 Write-Host "com0com: $setupc" -ForegroundColor DarkGray
 
-$busy = Get-BusyComNumbers -Setupc $setupc
-$loggerCat = Find-FreeCom -Busy $busy -Min 10 -Max 30
-[void]$busy.Add($loggerCat)
-$loggerKey = Find-FreeCom -Busy $busy -Min 10 -Max 30 -Exclude @($loggerCat)
-[void]$busy.Add($loggerKey)
-$vectorCat = Find-FreeCom -Busy $busy -Min 100 -Max 199
-[void]$busy.Add($vectorCat)
-$vectorKey = Find-FreeCom -Busy $busy -Min 100 -Max 199 -Exclude @($vectorCat)
+# Pre-flight do runtime ANTES de criar novas COMs.
+$runtimeRoot = $null
+if (-not $SkipService) {
+    $runtimeRoot = Resolve-RuntimeRoot -Preferred $RepoRoot
+    Write-Host "Runtime: $runtimeRoot" -ForegroundColor DarkGray
+}
+
+$programData = Join-Path $env:ProgramData "GADXVector"
+$logDir = Join-Path $programData "logs"
+$iniPath = Join-Path $programData "bridge.ini"
+$loggerIniPath = Join-Path $programData "logger.ini"
+New-Item -ItemType Directory -Force -Path $programData, $logDir | Out-Null
+
+# Se uma tentativa anterior ja chegou a gerar os INIs e os pares ainda existem,
+# retomamos exatamente a mesma instalacao em vez de consumir novas portas.
+$loggerCat = Get-IniComNumber -Path $loggerIniPath -Key "cat_port"
+$loggerKey = Get-IniComNumber -Path $loggerIniPath -Key "keying_port"
+$vectorCat = Get-IniComNumber -Path $iniPath -Key "port"
+$vectorKey = Get-IniComNumber -Path $iniPath -Key "keying_port"
+$listOutput = Get-SetupcList -Setupc $setupc
+$resume = $false
+
+if ($null -ne $loggerCat -and $null -ne $loggerKey -and $null -ne $vectorCat -and $null -ne $vectorKey) {
+    if ((Test-ComPairExists -ListOutput $listOutput -Left $loggerCat -Right $vectorCat) -and
+        (Test-ComPairExists -ListOutput $listOutput -Left $loggerKey -Right $vectorKey)) {
+        $resume = $true
+        Write-Host "Instalacao parcial detectada; reutilizando portas existentes." -ForegroundColor Yellow
+    }
+}
+
+if (-not $resume) {
+    $busy = Get-BusyComNumbers -Setupc $setupc
+    $loggerCat = Find-FreeCom -Busy $busy -Min 10 -Max 30
+    [void]$busy.Add($loggerCat)
+    $loggerKey = Find-FreeCom -Busy $busy -Min 10 -Max 30 -Exclude @($loggerCat)
+    [void]$busy.Add($loggerKey)
+    $vectorCat = Find-FreeCom -Busy $busy -Min 100 -Max 199
+    [void]$busy.Add($vectorCat)
+    $vectorKey = Find-FreeCom -Busy $busy -Min 100 -Max 199 -Exclude @($vectorCat)
+}
 
 Write-Host "Plano de portas:" -ForegroundColor Green
 Write-Host "  Logger CAT:    COM$loggerCat  <-> Vector CAT:    COM$vectorCat"
 Write-Host "  Logger CW/PTT: COM$loggerKey  <-> Vector Keying: COM$vectorKey"
 Write-Host "  Radio keying:  $RadioKeyingPort"
+if ($resume) { Write-Host "  Modo: retomada (pares ja existentes)" -ForegroundColor Yellow }
 
 $answer = Read-Host "Continuar? [S/n]"
 if ($answer -match '^[Nn]') { exit 1 }
 
-Install-ComPair -Setupc $setupc -Left $loggerCat -Right $vectorCat
-Install-ComPair -Setupc $setupc -Left $loggerKey -Right $vectorKey
+if (-not $resume) {
+    Install-ComPair -Setupc $setupc -Left $loggerCat -Right $vectorCat
+    Install-ComPair -Setupc $setupc -Left $loggerKey -Right $vectorKey
+}
 
-$programData = Join-Path $env:ProgramData "GADXVector"
-$logDir = Join-Path $programData "logs"
-New-Item -ItemType Directory -Force -Path $programData, $logDir | Out-Null
-$iniPath = Join-Path $programData "bridge.ini"
 Write-BridgeIni -Path $iniPath -VectorCat $vectorCat -VectorKeying $vectorKey -RadioKey $RadioKeyingPort -RadioKeyBaud $RadioKeyingBaud -HostName $RigHost -HostPort $RigPort
 @"
 [logger]
@@ -164,7 +224,7 @@ cat_port = COM$loggerCat
 keying_port = COM$loggerKey
 radio_model = TS-2000
 cat_baud = 19200
-"@ | Set-Content -Path (Join-Path $programData "logger.ini") -Encoding UTF8
+"@ | Set-Content -Path $loggerIniPath -Encoding UTF8
 Write-Host "bridge.ini gerado em $iniPath" -ForegroundColor Green
 
 if (-not $SkipService) {
@@ -172,13 +232,18 @@ if (-not $SkipService) {
     $appDir = Join-Path $env:ProgramFiles "GADX Vector"
     $serviceDir = Join-Path $appDir "service"
     New-Item -ItemType Directory -Force -Path $appDir, $serviceDir | Out-Null
-    Copy-Item (Join-Path $RepoRoot "rigctld_bridge.py") (Join-Path $appDir "rigctld_bridge.py") -Force
-    Copy-Item (Join-Path $RepoRoot "ts2000.py") (Join-Path $appDir "ts2000.py") -Force
-    Copy-Item (Join-Path $RepoRoot "service\vector_bridge_service.py") (Join-Path $serviceDir "vector_bridge_service.py") -Force
+
+    $serviceSource = Join-Path $runtimeRoot "service\vector_bridge_service.py"
+    if (-not (Test-Path $serviceSource)) { $serviceSource = Join-Path $runtimeRoot "vector_bridge_service.py" }
+    Copy-Item (Join-Path $runtimeRoot "rigctld_bridge.py") (Join-Path $appDir "rigctld_bridge.py") -Force
+    Copy-Item (Join-Path $runtimeRoot "ts2000.py") (Join-Path $appDir "ts2000.py") -Force
+    Copy-Item $serviceSource (Join-Path $serviceDir "vector_bridge_service.py") -Force
+
     & python -m pip install --upgrade pyserial pywin32
     if ($LASTEXITCODE -ne 0) { throw "Falha instalando pyserial/pywin32." }
     & python -m pywin32_postinstall -install
     if ($LASTEXITCODE -ne 0) { throw "Falha no pywin32_postinstall." }
+
     $serviceScript = Join-Path $serviceDir "vector_bridge_service.py"
     & python $serviceScript stop 2>$null | Out-Null
     & python $serviceScript remove 2>$null | Out-Null
