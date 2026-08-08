@@ -1,0 +1,70 @@
+name: Build GADX Vector Installer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'spikes/cat-ts2000/**'
+      - '.github/workflows/build-gadx-vector-installer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare payload directory
+        shell: powershell
+        run: |
+          $payload = 'spikes/cat-ts2000/installer/production/payload'
+          New-Item -ItemType Directory -Force -Path $payload | Out-Null
+
+      - name: Download Python 3.10.11 x64
+        shell: powershell
+        run: |
+          $url = 'https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe'
+          $out = 'spikes/cat-ts2000/installer/production/payload/python-3.10.11-amd64.exe'
+          curl.exe -fL --retry 3 --retry-delay 2 $url -o $out
+          if (-not (Test-Path $out)) { throw 'Python payload download failed.' }
+
+      - name: Download signed com0com 3.0.0.0 x64
+        shell: powershell
+        run: |
+          $url = 'https://downloads.sourceforge.net/project/signed-drivers/com0com/v3.0/Setup_com0com_v3.0.0.0_W7_x64_signed.exe'
+          $out = 'spikes/cat-ts2000/installer/production/payload/Setup_com0com_v3.0.0.0_W7_x64_signed.exe'
+          curl.exe -fL --retry 3 --retry-delay 2 $url -o $out
+          if (-not (Test-Path $out)) { throw 'com0com payload download failed.' }
+
+      - name: Show payload hashes
+        shell: powershell
+        run: |
+          Get-FileHash 'spikes/cat-ts2000/installer/production/payload/python-3.10.11-amd64.exe' -Algorithm SHA256
+          Get-FileHash 'spikes/cat-ts2000/installer/production/payload/Setup_com0com_v3.0.0.0_W7_x64_signed.exe' -Algorithm SHA256
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --yes --no-progress
+
+      - name: Compile installer
+        shell: powershell
+        working-directory: spikes/cat-ts2000/installer/production
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "ISCC not found at $iscc" }
+          & $iscc '.\setup.iss'
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with $LASTEXITCODE" }
+          if (-not (Test-Path '.\dist\GADX-Vector-Setup.exe')) { throw 'Installer EXE not produced.' }
+          Get-FileHash '.\dist\GADX-Vector-Setup.exe' -Algorithm SHA256
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: GADX-Vector-Setup
+          path: spikes/cat-ts2000/installer/production/dist/GADX-Vector-Setup.exe
+          if-no-files-found: error
+          retention-days: 30
