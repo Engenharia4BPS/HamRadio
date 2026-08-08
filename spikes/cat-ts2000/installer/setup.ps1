@@ -35,17 +35,24 @@ function Find-Setupc {
 function Invoke-Setupc {
     param(
         [string]$Setupc,
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [switch]$Quiet
     )
-    # com0com's install command resolves com0com.inf relative to the current
-    # working directory. Run setupc.exe from its own installation directory,
-    # otherwise it may look for com0com.inf in the directory where setup.ps1
-    # was launched (for example Downloads).
+
+    # com0com resolves com0com.inf relative to the current directory.
     $setupDir = Split-Path -Parent $Setupc
     Push-Location $setupDir
     try {
-        & $Setupc @Arguments
-        return $LASTEXITCODE
+        # IMPORTANT: capture native stdout/stderr locally. If we let it flow into
+        # the PowerShell pipeline, a caller assigning this function's return value
+        # receives output lines PLUS the integer exit code as Object[], causing a
+        # successful setupc exit 0 to be misread as failure.
+        $output = @(& $Setupc @Arguments 2>&1)
+        $exitCode = [int]$LASTEXITCODE
+        if (-not $Quiet) {
+            foreach ($line in $output) { Write-Host $line }
+        }
+        return $exitCode
     }
     finally {
         Pop-Location
