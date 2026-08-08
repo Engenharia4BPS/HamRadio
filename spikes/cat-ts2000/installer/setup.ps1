@@ -133,9 +133,15 @@ function Get-IniComNumber {
     return $null
 }
 
+function Write-Utf8NoBom {
+    param([string]$Path, [string]$Content)
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $encoding)
+}
+
 function Write-BridgeIni {
     param([string]$Path,[int]$VectorCat,[int]$VectorKeying,[string]$RadioKey,[int]$RadioKeyBaud,[string]$HostName,[int]$HostPort)
-@"
+    $content = @"
 [bridge]
 port = COM$VectorCat
 baud = 19200
@@ -155,42 +161,37 @@ allow_ptt = true
 allow_cw = true
 
 log_level = INFO
-"@ | Set-Content -Path $Path -Encoding UTF8
+"@
+    Write-Utf8NoBom -Path $Path -Content $content
 }
 
 function Invoke-PyWin32PostInstall {
     Write-Host "Executando pywin32 post-install..." -ForegroundColor Cyan
 
-    # Forma oficial preferida (pywin32 >= 309).
     & python -m pywin32_postinstall -install
     if ($LASTEXITCODE -eq 0) { return }
 
     Write-Host "Modulo pywin32_postinstall nao foi encontrado; tentando console script..." -ForegroundColor Yellow
 
-    $scriptsDir = (& python -c "import sysconfig; print(sysconfig.get_path('scripts'))").Trim()
-    $candidates = @(
-        (Join-Path $scriptsDir "pywin32_postinstall.exe"),
-        (Join-Path $scriptsDir "pywin32_postinstall.py"),
-        (Join-Path $scriptsDir "pywin32_postinstall")
-    )
+    $pythonExe = (& python -c "import sys; print(sys.executable)").Trim()
+    $pythonDir = Split-Path -Parent $pythonExe
+    $scriptsDir = Join-Path $pythonDir "Scripts"
+    $exeCandidate = Join-Path $scriptsDir "pywin32_postinstall.exe"
+    $pyCandidate = Join-Path $scriptsDir "pywin32_postinstall.py"
 
-    foreach ($candidate in $candidates) {
-        if (-not (Test-Path $candidate)) { continue }
-        Write-Host "pywin32 post-install: $candidate" -ForegroundColor DarkGray
-        if ($candidate.ToLower().EndsWith('.py')) {
-            & python $candidate -install
-        }
-        else {
-            & $candidate -install
-        }
+    if (Test-Path $exeCandidate) {
+        Write-Host "pywin32 post-install: $exeCandidate" -ForegroundColor DarkGray
+        & $exeCandidate -install
         if ($LASTEXITCODE -eq 0) { return }
     }
 
-    throw @"
-Nao foi possivel executar o pywin32 post-install.
-O pywin32 foi instalado, mas nem o modulo nem o console script foram encontrados/aceitos.
-Scripts pesquisados em: $scriptsDir
-"@
+    if (Test-Path $pyCandidate) {
+        Write-Host "pywin32 post-install: $pyCandidate" -ForegroundColor DarkGray
+        & python $pyCandidate -install
+        if ($LASTEXITCODE -eq 0) { return }
+    }
+
+    throw "Falha no pywin32 post-install."
 }
 
 Assert-Administrator
@@ -250,13 +251,14 @@ if (-not $resume) {
 }
 
 Write-BridgeIni -Path $iniPath -VectorCat $vectorCat -VectorKeying $vectorKey -RadioKey $RadioKeyingPort -RadioKeyBaud $RadioKeyingBaud -HostName $RigHost -HostPort $RigPort
-@"
+$loggerContent = @"
 [logger]
 cat_port = COM$loggerCat
 keying_port = COM$loggerKey
 radio_model = TS-2000
 cat_baud = 19200
-"@ | Set-Content -Path $loggerIniPath -Encoding UTF8
+"@
+Write-Utf8NoBom -Path $loggerIniPath -Content $loggerContent
 Write-Host "bridge.ini gerado em $iniPath" -ForegroundColor Green
 
 if (-not $SkipService) {
