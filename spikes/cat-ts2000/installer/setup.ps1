@@ -165,14 +165,31 @@ log_level = INFO
     Write-Utf8NoBom -Path $Path -Content $content
 }
 
-function Invoke-PyWin32PostInstall {
-    Write-Host "Executando pywin32 post-install..." -ForegroundColor Cyan
+function Test-PyWin32RuntimeReady {
+    try {
+        $info = & python -c "import os,sys,win32service,win32serviceutil,servicemanager; root=os.path.dirname(sys.executable); print(root); print(os.path.exists(os.path.join(root,'pythonservice.exe'))); print(os.path.exists(os.path.join(root,'pywintypes310.dll')) or True)" 2>$null
+        if ($LASTEXITCODE -ne 0) { return $false }
+        $lines = @($info)
+        $pythonDir = $lines[0].Trim()
+        $pythonService = Join-Path $pythonDir "pythonservice.exe"
+        if (-not (Test-Path $pythonService)) { return $false }
+        & python -c "import win32service, win32serviceutil, servicemanager" 2>$null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch { return $false }
+}
 
+function Invoke-PyWin32PostInstall {
+    if (Test-PyWin32RuntimeReady) {
+        Write-Host "pywin32 runtime ja preparado; pulando post-install." -ForegroundColor DarkGray
+        return
+    }
+
+    Write-Host "Executando pywin32 post-install..." -ForegroundColor Cyan
     & python -m pywin32_postinstall -install
     if ($LASTEXITCODE -eq 0) { return }
 
     Write-Host "Modulo pywin32_postinstall nao foi encontrado; tentando console script..." -ForegroundColor Yellow
-
     $pythonExe = (& python -c "import sys; print(sys.executable)").Trim()
     $pythonDir = Split-Path -Parent $pythonExe
     $scriptsDir = Join-Path $pythonDir "Scripts"
@@ -184,13 +201,11 @@ function Invoke-PyWin32PostInstall {
         & $exeCandidate -install
         if ($LASTEXITCODE -eq 0) { return }
     }
-
     if (Test-Path $pyCandidate) {
         Write-Host "pywin32 post-install: $pyCandidate" -ForegroundColor DarkGray
         & python $pyCandidate -install
         if ($LASTEXITCODE -eq 0) { return }
     }
-
     throw "Falha no pywin32 post-install."
 }
 
@@ -279,6 +294,7 @@ if (-not $SkipService) {
 
     $serviceScript = Join-Path $serviceDir "vector_bridge_service.py"
     & python $serviceScript stop 2>$null | Out-Null
+    Start-Sleep -Milliseconds 500
     & python $serviceScript remove 2>$null | Out-Null
     & python $serviceScript install
     if ($LASTEXITCODE -ne 0) { throw "Falha instalando o servico GADXVectorBridge." }
