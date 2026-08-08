@@ -1,7 +1,7 @@
 # GADX Vector
 # 14 - SPIKE-002 — Emulação CAT TS-2000
 
-Versão: 1.1 (Draft)
+Versão: 1.2 (Draft)
 Status: Em execução — N1MM conectado com sucesso
 
 ---
@@ -23,6 +23,30 @@ TS-2000 CAT Emulator
       |
       v
 Estado simulado
+```
+
+---
+
+# Fonte Canônica do Protocolo CAT
+
+A especificação normativa utilizada pelo emulador é o manual oficial:
+
+**JVCKENWOOD — TS-2000 / TS-2000X / TS-B2000 Instruction Manual — B62-1221-70**
+
+A parte de Computer Control encontra-se no **Chapter 21 — Appendix**:
+
+- COM Connector — página 113;
+- Computer Control — página 114;
+- PC Control Command Tables — páginas 115 a 141.
+
+Quando houver conflito entre uma implementação anterior do SPIKE, exemplos encontrados na Internet ou suposições feitas durante testes e a tabela oficial do manual, **o manual B62-1221-70 prevalece**.
+
+A captura empírica de N1MM/DXLog continua sendo usada para decidir **quais comandos precisam ser implementados**, mas o formato e a semântica de cada comando implementado devem seguir a documentação oficial Kenwood.
+
+Caminho previsto para a cópia de referência no repositório:
+
+```text
+references/kenwood/TS-2000/B62-1221-70.pdf
 ```
 
 ---
@@ -96,51 +120,71 @@ N1MM
 
 ## Comandos descobertos
 
-| Comando | Observado | Situação após iteração 2 |
+| Comando | Observado | Situação atual |
 |---|---:|---|
 | `FR` | Sim | Implementado |
-| `IF` | Sim | Implementado |
-| `AI0` | Sim | Implementado |
-| `FA` | Sim | Implementado |
-| `FB` | Sim | Implementado |
-| `AG0` | Sim | Implementado |
-| `MD` | Não nesta captura | Implementado |
-| `FT` | Não nesta captura | Implementado |
-| `TX` | Não nesta captura | Implementado |
-| `RX` | Não nesta captura | Implementado |
-| `ID` | Não nesta captura | Implementado |
-
-A captura real demonstrou que `IF`, `AI` e `AG` precisavam entrar já na segunda iteração.
+| `IF` | Sim | Implementado conforme B62-1221-70 |
+| `AI0` | Sim | Implementado conforme B62-1221-70 |
+| `FA` | Sim | Implementado conforme B62-1221-70 |
+| `FB` | Sim | Implementado conforme B62-1221-70 |
+| `AG0` | Sim | Implementado conforme B62-1221-70 |
+| `MD` | Não nesta captura | Implementado conforme B62-1221-70 |
+| `FT` | Não nesta captura | Implementado conforme B62-1221-70 |
+| `TX` | Não nesta captura | Implementado conforme B62-1221-70 |
+| `RX` | Não nesta captura | Implementado conforme B62-1221-70 |
+| `ID` | Não nesta captura | Implementado conforme B62-1221-70 |
 
 ---
 
 # Subconjunto CAT implementado
 
-| Comando | Função |
-|---|---|
-| `ID` | Identificação TS-2000 (`019`) |
-| `FA` | Frequência VFO A |
-| `FB` | Frequência VFO B |
-| `MD` | Modo |
-| `FR` | VFO de recepção |
-| `FT` | VFO de transmissão |
-| `TX` | Estado TX simulado |
-| `RX` | Estado RX simulado |
-| `IF` | Estado agregado do transceptor |
-| `AI` | Auto Information (`0`/`2`) |
-| `AG` | AF gain do transceptor principal |
+| Comando | Função | Regra oficial usada |
+|---|---|---|
+| `ID` | Identificação TS-2000 | `ID019;` |
+| `FA` | Frequência VFO A | 11 dígitos em Hz |
+| `FB` | Frequência VFO B | 11 dígitos em Hz |
+| `MD` | Modo | códigos Kenwood 1..9, com 8 reservado |
+| `FR` | seleção RX | 0=A, 1=B; 2=M.CH e 3=CALL previstos pelo protocolo |
+| `FT` | seleção TX | 0=A, 1=B; 2=M.CH e 3=CALL previstos pelo protocolo |
+| `TX` | Transmit | `TX0;` main / `TX1;` sub |
+| `RX` | Receive | `RX;` |
+| `IF` | Estado agregado | resposta fixa de 38 caracteres |
+| `AI` | Auto Information | `0=OFF`, `2=Extended AI`; AI1/AI3 não suportados |
+| `AG` | AF gain | receiver 0/1 + nível `000..255` |
 
-A implementação seguirá a regra:
+A implementação seguirá duas regras:
 
-> **Implementar somente comandos necessários e comprovadamente utilizados, mantendo logging completo dos comandos desconhecidos.**
+> **Implementar somente comandos necessários e comprovadamente utilizados pelos loggers.**
+
+> **Para cada comando implementado, seguir o formato oficial B62-1221-70.**
 
 ---
 
-# Estrutura do IF
+# Estrutura Oficial do IF
 
-A segunda iteração implementa a resposta `IF` conforme os campos definidos na tabela de comandos PC do TS-2000. O estado do SPIKE preenche dinamicamente frequência, RX/TX, modo, VFO e split; campos ainda não modelados são publicados como valores inativos seguros.
+A resposta `IF` segue os campos da tabela oficial Kenwood:
 
-Essa resposta deverá ser validada empiricamente pelo comportamento do N1MM. Caso o logger revele divergência de posição ou semântica, a captura real terá precedência e o emulador será corrigido.
+| Campo | Conteúdo |
+|---|---|
+| P1 | Frequência em Hz, 11 dígitos |
+| P2 | Frequency step, 4 caracteres |
+| P3 | Offset RIT/XIT assinado, 6 caracteres |
+| P4 | RIT OFF/ON |
+| P5 | XIT OFF/ON |
+| P6 | Memory bank |
+| P7 | Memory channel, 2 caracteres |
+| P8 | RX/TX |
+| P9 | Operating mode, conforme `MD` |
+| P10 | VFO/M.CH/CALL, conforme `FR`/`FT` |
+| P11 | Scan status |
+| P12 | Simplex/Split |
+| P13 | OFF/TONE/CTCSS/DCS |
+| P14 | Tone number, 2 caracteres |
+| P15 | Shift status |
+
+Com prefixo `IF` e terminador `;`, a resposta possui **38 caracteres**.
+
+Campos que ainda não têm representação funcional no `RadioState` devem permanecer com valores coerentes/inativos até serem necessários; eles não devem ser inventados fora da especificação.
 
 ---
 
@@ -210,11 +254,11 @@ PTT altera somente estado booleano simulado.
 
 # Próximo Teste
 
-Substituir `ts2000.py` pela iteração 2 e repetir o laboratório N1MM.
+Usar a versão do `ts2000.py` alinhada ao manual B62-1221-70 e repetir o laboratório N1MM.
 
-Resultado esperado no log: desaparecerem os avisos `UNSUPPORTED` para `IF`, `AI0` e `AG0`.
+Resultado esperado no log: ausência de `UNSUPPORTED` para `IF`, `AI0` e `AG0` e reconhecimento consistente da frequência inicial de **14.074.000 Hz / USB**.
 
-Depois, confirmar visualmente se o N1MM reconhece a frequência inicial de **14.074.000 Hz / USB** e provocar mudanças de frequência para observar comandos `FAxxxxxxxxxxx;` enviados pelo logger.
+Depois, provocar mudanças de frequência, modo, split e PTT para registrar o comportamento real do logger.
 
 ---
 
