@@ -13,11 +13,12 @@ $ConfigDir = Join-Path $InstallRoot "config"
 $LogDir = Join-Path $InstallRoot "logs"
 $ThirdPartyDir = Join-Path $InstallRoot "thirdparty"
 $PythonInstaller = Join-Path $ThirdPartyDir "python-installer.exe"
-$Com0comSetup = Join-Path $ThirdPartyDir "com0com\setupc.exe"
+$Com0comInstaller = Join-Path $ThirdPartyDir "com0com-installer.exe"
 $BridgeIni = Join-Path $ConfigDir "bridge.ini"
 $LoggerIni = Join-Path $ConfigDir "logger.ini"
 $ServiceScript = Join-Path $InstallRoot "service\vector_bridge_service.py"
 $PythonExe = Join-Path $RuntimeDir "python.exe"
+$script:Com0comSetup = $null
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -32,19 +33,62 @@ function Write-Utf8NoBom([string]$Path, [string]$Content) {
     [System.IO.File]::WriteAllText($Path, $Content, $encoding)
 }
 
-function Invoke-Com0com([string[]]$Arguments, [switch]$Capture) {
-    if (-not (Test-Path $Com0comSetup)) {
-        throw "Bundled signed com0com setupc.exe was not found: $Com0comSetup"
+function Find-Com0comSetup {
+    $candidates = @(
+        "$env:ProgramFiles\com0com\setupc.exe",
+        "${env:ProgramFiles(x86)}\com0com\setupc.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) { return (Resolve-Path $candidate).Path }
     }
-    $cwd = Split-Path -Parent $Com0comSetup
+    return $null
+}
+
+function Ensure-Com0com {
+    $existing = Find-Com0comSetup
+    if ($existing) {
+        $script:Com0comSetup = $existing
+        Write-Host "com0com already installed: $existing"
+        return
+    }
+
+    if (-not (Test-Path $Com0comInstaller)) {
+        throw "Bundled com0com installer not found: $Com0comInstaller"
+    }
+
+    Write-Host "Installing signed com0com 3.0.0.0..."
+    $oldPair1 = $env:CNC_INSTALL_CNCA0_CNCB0_PORTS
+    $oldPair2 = $env:CNC_INSTALL_COMX_COMX_PORTS
+    try {
+        $env:CNC_INSTALL_CNCA0_CNCB0_PORTS = "NO"
+        $env:CNC_INSTALL_COMX_COMX_PORTS = "NO"
+        $p = Start-Process -FilePath $Com0comInstaller -ArgumentList @('/S') -Wait -PassThru
+        if ($p.ExitCode -ne 0) { throw "com0com installer failed with exit code $($p.ExitCode)." }
+    }
+    finally {
+        $env:CNC_INSTALL_CNCA0_CNCB0_PORTS = $oldPair1
+        $env:CNC_INSTALL_COMX_COMX_PORTS = $oldPair2
+    }
+
+    Start-Sleep -Seconds 2
+    $script:Com0comSetup = Find-Com0comSetup
+    if (-not $script:Com0comSetup) {
+        throw "com0com installer completed but setupc.exe was not found."
+    }
+}
+
+function Invoke-Com0com([string[]]$Arguments, [switch]$Capture) {
+    if (-not $script:Com0comSetup) { throw "com0com setupc.exe is not initialized." }
+    $cwd = Split-Path -Parent $script:Com0comSetup
     Push-Location $cwd
     try {
         if ($Capture) {
-            $output = @(& $Com0comSetup @Arguments 2>&1)
-            if ($LASTEXITCODE -ne 0) { throw "com0com failed with exit code $LASTEXITCODE" }
+            $output = @(& $script:Com0comSetup @Arguments 2>&1)
+            $exitCode = [int]$LASTEXITCODE
+            if ($exitCode -ne 0) { throw "com0com failed with exit code $exitCode" }
             return ,$output
         }
-        & $Com0comSetup @Arguments
+        & $script:Com0comSetup @Arguments
         if ($LASTEXITCODE -ne 0) { throw "com0com failed with exit code $LASTEXITCODE" }
     }
     finally { Pop-Location }
@@ -86,12 +130,10 @@ function Test-ComPair([int]$Left, [int]$Right) {
 }
 
 function Ensure-PythonRuntime {
-    if (Test-Path $PythonExe) {
-        Write-Host "Private Python runtime already present: $PythonExe"
-    }
-    else {
+    if (-not (Test-Path $PythonExe)) {
         if (-not (Test-Path $PythonInstaller)) { throw "Python installer payload not found: $PythonInstaller" }
         New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
+        Write-Host "Installing private Python 3.10.11 runtime..."
         $args = @(
             '/quiet',
             'InstallAllUsers=1',
@@ -113,24 +155,20 @@ function Ensure-PythonRuntime {
         if ($p.ExitCode -ne 0) { throw "Private Python installation failed with exit code $($p.ExitCode)." }
         if (-not (Test-Path $PythonExe)) { throw "Python installer finished but $PythonExe does not exist." }
     }
+    else {
+        Write-Host "Private Python runtime already present: $PythonExe"
+    }
 
-    & $PythonExe -m pip install --disable-pip-version-check --upgrade pyserial pywin32
+    & $PythonExe -m pip install --disable-pip-version-check --upgrade "pyserial==3.5" "pywin32==312"
     if ($LASTEXITCODE -ne 0) { throw "Failed to install Vector Python dependencies." }
 
-    # Prepare pywin32 only if the service host has not been installed into this private runtime.
     $PythonServiceExe = Join-Path $RuntimeDir "pythonservice.exe"
     if (-not (Test-Path $PythonServiceExe)) {
         $postExe = Join-Path $RuntimeDir "Scripts\pywin32_postinstall.exe"
         $postPy = Join-Path $RuntimeDir "Scripts\pywin32_postinstall.py"
-        if (Test-Path $postExe) {
-            & $postExe -install
-        }
-        elseif (Test-Path $postPy) {
-            & $PythonExe $postPy -install
-        }
-        else {
-            throw "pywin32 post-install tool not found in private runtime."
-        }
+        if (Test-Path $postExe) { & $postExe -install }
+        elseif (Test-Path $postPy) { & $PythonExe $postPy -install }
+        else { throw "pywin32 post-install tool not found in private runtime." }
         if ($LASTEXITCODE -ne 0) { throw "pywin32 post-install failed." }
     }
 }
@@ -171,6 +209,7 @@ function Install-Service {
 
 Assert-Administrator
 New-Item -ItemType Directory -Force -Path $InstallRoot,$RuntimeDir,$ConfigDir,$LogDir | Out-Null
+Ensure-Com0com
 Ensure-PythonRuntime
 $ports = Ensure-ComPairs
 $loggerCat,$loggerKey,$vectorCat,$vectorKey = $ports
