@@ -35,11 +35,15 @@ function Find-Setupc {
 function Get-BusyComNumbers {
     param([string]$Setupc)
     $output = & $Setupc --silent busynames 'COM?*' 2>&1
-    $busy = New-Object 'System.Collections.Generic.HashSet[int]'
+    $busy = [System.Collections.Generic.HashSet[int]]::new()
     foreach ($line in $output) {
         if ($line -match '^\s*COM(\d+)\s*$') { [void]$busy.Add([int]$Matches[1]) }
     }
-    return $busy
+
+    # PowerShell normally enumerates collection objects returned from functions.
+    # The unary comma forces the HashSet itself to be returned as one object,
+    # otherwise the caller receives a fixed-size Object[] and .Add() fails.
+    return ,$busy
 }
 
 function Find-FreeCom {
@@ -154,20 +158,17 @@ if (-not $SkipService) {
     & python -m pip install --upgrade pyserial pywin32
     if ($LASTEXITCODE -ne 0) { throw "Falha instalando pyserial/pywin32." }
 
-    # A documentacao do pywin32 recomenda o post-install global/elevado para servicos.
     & python -m pywin32_postinstall -install
     if ($LASTEXITCODE -ne 0) { throw "Falha no pywin32_postinstall." }
 
     $serviceScript = Join-Path $serviceDir "vector_bridge_service.py"
 
-    # Remove uma instalacao anterior do wrapper, se houver.
     & python $serviceScript stop 2>$null | Out-Null
     & python $serviceScript remove 2>$null | Out-Null
 
     & python $serviceScript install
     if ($LASTEXITCODE -ne 0) { throw "Falha instalando o servico GADXVectorBridge." }
 
-    # Configuracao nativa do Windows: delayed-auto + tres tentativas de reinicio.
     & sc.exe config GADXVectorBridge start= delayed-auto | Out-Null
     & sc.exe failure GADXVectorBridge reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
     & sc.exe failureflag GADXVectorBridge 1 | Out-Null
