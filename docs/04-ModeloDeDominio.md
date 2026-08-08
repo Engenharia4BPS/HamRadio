@@ -8,23 +8,17 @@ Status: Draft
 
 # Objetivo
 
-Este documento define o modelo de domínio do GADX Vector.
+Este documento define o modelo conceitual do GADX Vector: quais entidades existem, como se relacionam e quais responsabilidades possuem.
 
-Seu objetivo é estabelecer quais entidades existem dentro da plataforma, como elas se relacionam e quais responsabilidades possuem.
-
-Este documento **não** define protocolos, APIs ou detalhes de implementação. Essas definições encontram-se nos documentos posteriores.
+Este documento não redefine contratos normativos posteriores. Estados e transições são definidos em `06-MaquinaDeEstados.md`; mensagens em `05-Protocolo.md`; API em `07-API.md`; Drivers em `08-Drivers.md`; detalhamento de Resources em `09-ModeloDeRecursos.md`.
 
 ---
 
 # Filosofia
 
-No GADX Vector, equipamentos físicos não são controlados diretamente. Todos os equipamentos são abstraídos como **Recursos (Resources)**, acessados por meio de **Drivers** e manipulados através do Modelo de Domínio.
+Equipamentos físicos não são controlados diretamente pelo núcleo. Eles são abstraídos como **Resources**, acessados por meio de **Drivers** e manipulados através do Modelo de Domínio.
 
-Um rádio, um rotor, um amplificador, uma câmera IP ou um WebSDR são recursos controláveis.
-
-O Vector Gateway não trabalha diretamente com equipamentos. Ele trabalha com Recursos e utiliza Drivers para integrar tecnologias específicas.
-
-Essa decisão torna a plataforma independente do hardware utilizado e permite sua evolução para novos tipos de equipamentos sem alterar a arquitetura central.
+Um rádio, rotor, amplificador, câmera, sensor ou serviço pode ser representado como Resource quando fizer sentido operacional.
 
 ---
 
@@ -32,23 +26,19 @@ Essa decisão torna a plataforma independente do hardware utilizado e permite su
 
 ```text
 Site
- |
- ├── Gateway
- |
- ├── Resources
- |      |
- |      ├── Radio
- |      ├── Rotor
- |      ├── Amplifier
- |      ├── Antenna Switch
- |      ├── Power Controller
- |      ├── Camera
- |      ├── Audio Device
- |      └── ...
- |
- └── Sessions
-        |
-        └── Operators
+├── Vector Gateway
+├── Resources
+│   ├── Radio
+│   ├── Rotor
+│   ├── Amplifier
+│   ├── Antenna
+│   ├── AntennaSwitch
+│   ├── PowerController
+│   ├── Camera
+│   ├── AudioDevice
+│   └── ...
+└── Sessions
+    └── Operators
 ```
 
 ---
@@ -58,372 +48,281 @@ Site
 Representa uma estação física controlada pelo GADX Vector.
 
 Exemplos iniciais:
-
 - Purunã
 - Guatupê
 - Casa 68
 - Estação de Satélite
 
-## Atributos conceituais
-
+Atributos conceituais:
 - `id`
 - `name`
 - `description`
 - `location`
-- `grid_locator`
+- `gridLocator`
 - `timezone`
 - `status`
-- `capabilities`
 - `resources`
+
+Cada Site possui um Vector Gateway como autoridade local.
 
 ---
 
 # Resource
 
-Entidade base para qualquer equipamento ou serviço controlável dentro da plataforma.
+Entidade base para equipamento, dispositivo ou serviço controlável/monitorável.
 
-Todos os equipamentos controláveis devem ser representados por uma especialização de Resource.
-
-## Atributos conceituais
-
+Atributos conceituais:
 - `id`
 - `name`
 - `type`
+- `siteId`
 - `manufacturer`
 - `model`
-- `status`
-- `online`
-- `availability`
-- `current_operator`
-- `gateway`
+- `state`
+- `health`
 - `capabilities`
+- `lease`
+- `properties`
+
+Os estados normativos de Resource são definidos exclusivamente em `06-MaquinaDeEstados.md`.
 
 ---
 
 # Radio
 
-Especialização de Resource que representa um transceptor ou receptor controlável.
+Especialização de Resource para transceptor ou receptor.
 
-## Estados iniciais
-
-- `ONLINE`
-- `OFFLINE`
-- `ERROR`
-- `BUSY`
-- `LOCKED`
-- `MAINTENANCE`
-
-## Capacidades possíveis
-
+Capabilities possíveis incluem:
 - Frequency
 - Mode
 - Split
 - PTT
-- CW
-- Voice
-- AM
-- FM
-- USB
-- LSB
-- RTTY
-- Data
-- Satellite
+- VFO
+- Power
+- Filter
 
-A presença de uma capacidade deve ser anunciada pelo próprio recurso, evitando pressupor que todos os rádios suportam todas as funções.
+USB, LSB, CW, DIGI, AM, FM e equivalentes são valores/modos operacionais, não estados base do Resource.
 
 ---
 
 # Rotor
 
-Especialização de Resource que representa um sistema de rotação de antena.
+Especialização de Resource para sistema de rotação.
 
-## Capacidades possíveis
-
+Capabilities possíveis:
 - Azimuth
 - Elevation
 - Preset
 - Tracking
 - Stop
+- Park
 
 ---
 
 # Amplifier
 
-Especialização de Resource que representa um amplificador de RF.
+Especialização de Resource para amplificador de RF.
 
-## Capacidades possíveis
-
-- Power On
-- Power Off
-- Standby
+Capabilities possíveis:
 - Operate
+- Standby
 - Band
 - Output Power
 - Temperature
-- Fault State
+- SWR
+- Fault
 
 ---
 
-# Antenna Switch
+# Antenna e AntennaSwitch
 
-Especialização de Resource responsável por seleção e roteamento de antenas ou caminhos de RF.
+**Antenna** representa a antena como entidade operacional, inclusive quando passiva, permitindo modelar banda, direção e dependências.
 
-## Capacidades possíveis
-
-- Select Port
-- Current Port
-- Lock
-- Interlock
+**AntennaSwitch** representa seleção e roteamento de caminhos de RF e pode oferecer SelectPort, Lock e Interlock.
 
 ---
 
-# Power Controller
+# PowerController, Relay, Sensor, AudioDevice e Camera
 
-Especialização de Resource para controle de alimentação elétrica ou dispositivos auxiliares.
+Esses tipos representam, respectivamente, controle/telemetria elétrica, relés, sensores, áudio e monitoramento visual.
 
-## Capacidades possíveis
-
-- Power On
-- Power Off
-- Restart
-- Voltage
-- Current
-- Fault State
-
----
-
-# Audio Device
-
-Representa dispositivos ou serviços relacionados a áudio de operação.
-
-Exemplos:
-
-- Sound Card
-- Remote Audio
-- Voice Keyer
-
----
-
-# Camera
-
-Representa dispositivos de monitoramento visual da estação.
-
-Pode representar:
-
-- Webcam
-- Câmera IP
-- PTZ
+Seu contrato detalhado encontra-se em `09-ModeloDeRecursos.md`.
 
 ---
 
 # Operator
 
-Representa um operador autenticado na plataforma.
+Representa um operador autenticável/autorizável.
 
-## Atributos conceituais
-
+Atributos conceituais:
 - `id`
 - `callsign`
 - `name`
+- `roles`
 - `permissions`
-- `active_sessions`
 
 ---
 
 # Session
 
-Representa uma conexão autenticada entre um operador e um Vector Gateway.
+Contexto autenticado entre Operator/Client e Vector Gateway.
 
-Uma sessão pode solicitar e controlar múltiplos recursos conforme permissões e políticas de acesso.
+Uma Session pode adquirir Resources conforme permissões e políticas.
 
-## Estados iniciais
+Os estados normativos da Session são definidos em `06-MaquinaDeEstados.md` e não devem ser duplicados neste documento.
 
-- `CREATED`
-- `CONNECTED`
-- `AUTHENTICATED`
-- `ACTIVE`
-- `DISCONNECTED`
-- `TIMEOUT`
-- `REVOKED`
+---
+
+# Lease e Ownership
+
+**Lease** é a concessão temporária de controle de um Resource a uma Session.
+
+**Ownership** identifica qual Session possui o direito corrente de controle.
+
+Resources que exigem exclusividade possuem no máximo um Lease exclusivo de controle por vez, conforme ADR-010.
+
+Observadores somente leitura podem existir quando permitidos pela política do Resource.
 
 ---
 
 # Vector Gateway
 
-Representa o serviço Vector instalado em um Site.
-
-É responsável por:
-
-- autenticação;
-- autorização;
-- gerenciamento de sessões;
-- publicação e descoberta de recursos;
-- manutenção de estado;
-- gerenciamento de ownership;
+Serviço instalado em um Site e responsável por:
+- autenticação e autorização;
+- Sessions e Leases;
+- Resource Registry/Manager;
+- estado autoritativo;
+- políticas e interlocks;
 - integração com Drivers;
-- aplicação de políticas e interlocks.
+- auditoria e health.
 
-O Vector Gateway não deve controlar equipamentos diretamente quando existir uma camada de Driver apropriada.
+O Gateway não controla hardware diretamente quando existir Driver apropriado.
 
 ---
 
 # Driver
 
-Camada responsável por integrar o Vector Gateway com tecnologias e protocolos específicos.
+Camada que traduz operações e estados entre o domínio Vector e backend/hardware específico.
 
-Exemplos futuros:
-
+Exemplos:
 - Hamlib Driver
-- FlexRadio Driver
-- Kenwood CAT Driver
-- Icom CI-V Driver
-- Yaesu CAT Driver
 - Rotor Driver
 - Amplifier Driver
 - Simulator Driver
 
-Um Driver traduz operações do Modelo de Domínio para a tecnologia específica e converte estados externos de volta para o domínio Vector.
+Na v1, o backend oficial de Radio é Hamlib, preferencialmente via `rigctld`, acessado pelo Hamlib Driver.
 
 ---
 
 # Vector Client
 
-Aplicação utilizada pelo operador para acessar a plataforma.
-
-Responsabilidades iniciais:
-
+Componente do operador responsável por:
 - interface Web local;
-- autenticação do operador;
-- seleção de Site;
-- seleção e aquisição de recursos;
-- comunicação com Vector Gateway;
+- autenticação;
+- seleção de Site e Resource;
+- aquisição/liberação de Lease;
+- comunicação via Vector Protocol;
+- serviço local nativo;
 - COM virtual;
 - emulação CAT;
-- compatibilidade com N1MM, DXLog e outros softwares externos.
+- compatibilidade com N1MM Logger+ e DXLog.
 
 ---
 
 # Capabilities
 
-Capabilities descrevem o que um Resource consegue fazer.
+Capabilities descrevem o que um Resource efetivamente consegue fazer.
 
-O sistema não deve presumir funções apenas com base no tipo do equipamento.
-
-Exemplo:
+O sistema não deve presumir funções apenas pelo tipo ou modelo.
 
 ```text
 Radio
- ├── Frequency
- ├── Mode
- ├── Split
- └── PTT
+├── Frequency
+├── Mode
+├── Split
+└── PTT
 
 Rotor
- ├── Azimuth
- └── Elevation
+├── Azimuth
+└── Elevation
 ```
 
-Isso permite que diferentes equipamentos do mesmo tipo apresentem conjuntos diferentes de recursos suportados.
+A Capability anunciada pelo Gateway é a referência funcional para Clients.
 
 ---
 
-# Ownership e Reserva de Recursos
+# Relações e Dependencies
 
-Todo Resource controlável deve possuir um estado de disponibilidade e uma política clara de ownership.
-
-Estados conceituais iniciais:
-
-- `FREE`
-- `RESERVED`
-- `IN_USE`
-- `ADMIN_LOCK`
-- `MAINTENANCE`
-
-O ownership é temporário e vinculado a uma Session.
-
-A perda da Session deve provocar uma política segura de liberação ou recuperação do Resource.
-
----
-
-# Relações entre Recursos
-
-Recursos podem possuir dependências entre si.
-
-Exemplo:
+Resources podem depender uns dos outros.
 
 ```text
 Radio 1
-  |
-  ├── Amplifier 1
-  ├── Antenna Switch 1
-  └── Rotor 1
+├── Amplifier 1
+├── AntennaSwitch 1
+└── Rotor 1
 ```
 
-Essas relações permitem que o Vector futuramente aplique automações e interlocks.
-
-Exemplos:
-
+Essas relações permitem políticas/interlocks como:
 - impedir troca de antena durante PTT;
-- impedir movimento de rotor além de limites configurados;
-- selecionar automaticamente a banda do amplificador;
-- bloquear dois rádios de utilizarem simultaneamente o mesmo caminho de RF.
+- bloquear caminhos de RF incompatíveis;
+- limitar movimento de rotor;
+- coordenar banda do amplificador.
 
 ---
 
-# Estado Desejado e Estado Observado
+# Desired, Observed e Authoritative State
 
-Sempre que possível, o domínio deve distinguir:
-
-- **Desired State** — estado solicitado pelo operador ou automação;
-- **Observed State** — estado efetivamente observado no equipamento.
-
-Exemplo:
+- **Desired State** — estado solicitado.
+- **Observed State** — estado efetivamente observado pelo Driver/backend/hardware.
+- **Authoritative State** — estado reconhecido e publicado pelo Gateway.
 
 ```text
-Desired Frequency: 14.074.000 Hz
-Observed Frequency: 14.074.000 Hz
+Client solicita
+      ↓
+Gateway valida
+      ↓
+Driver executa
+      ↓
+Hardware/backend confirma
+      ↓
+Gateway publica estado autoritativo
 ```
 
-Essa distinção será importante para equipamentos remotos, latência de rede, falhas de comunicação e confirmação de comandos.
+Quando não houver confirmação técnica suficiente, o sistema não deve apresentar estado inferido como confirmado.
 
 ---
 
 # Eventos de Domínio
 
-Mudanças relevantes no estado dos Resources devem gerar eventos.
-
-Exemplos:
-
+Mudanças relevantes produzem eventos, por exemplo:
 - `FrequencyChanged`
 - `ModeChanged`
 - `PTTChanged`
 - `ResourceAcquired`
 - `ResourceReleased`
 - `ResourceOffline`
-- `RotorMoved`
-- `AmplifierFault`
-- `CameraOffline`
-- `SessionExpired`
+- `LeaseExpired`
+- `FaultRaised`
 
-A especificação formal dos eventos será definida em documento próprio.
+A especificação das mensagens pertence ao Vector Protocol.
 
 ---
 
 # Princípios do Modelo de Domínio
 
-1. Equipamentos físicos são abstraídos como Resources.
+1. Equipamentos e serviços são abstraídos como Resources.
 2. Integrações específicas são encapsuladas em Drivers.
-3. Capabilities descrevem funcionalidades suportadas.
-4. Sessions representam conexões de operadores.
-5. Ownership define quem pode comandar um Resource.
-6. Mudanças relevantes produzem eventos de domínio.
+3. Capabilities descrevem funcionalidades efetivamente disponíveis.
+4. Sessions representam contextos autenticados.
+5. Leases/Ownership governam controle exclusivo.
+6. Mudanças relevantes produzem Events.
 7. O domínio é independente de Hamlib, CAT, fabricantes e sistemas operacionais.
-8. Protocolos e APIs manipulam entidades do domínio e não hardware diretamente.
+8. Protocolos e APIs manipulam domínio, não hardware diretamente.
+9. O Gateway publica o estado autoritativo.
+10. Estados normativos pertencem à Máquina de Estados, evitando definições concorrentes.
 
 ---
 
 # Regra Central
 
 > **No GADX Vector, equipamentos físicos não são controlados diretamente. Todos os equipamentos são abstraídos como Resources, acessados por meio de Drivers e manipulados através do Modelo de Domínio.**
-
-Todo protocolo, API, interface ou automação do GADX Vector deve respeitar esta regra.
