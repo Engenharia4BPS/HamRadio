@@ -35,53 +35,11 @@ Source: "..\..\ts2000.py"; DestDir: "{app}\app"; Flags: ignoreversion
 Source: "..\..\service\vector_bridge_service.py"; DestDir: "{app}\service"; Flags: ignoreversion
 Source: "install-vector.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "uninstall-vector.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
-Source: "payload\python-installer.exe"; DestDir: "{app}\thirdparty"; Flags: ignoreversion deleteafterinstall
-Source: "payload\com0com\*"; DestDir: "{app}\thirdparty\com0com"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "payload\python-3.10.11-amd64.exe"; DestDir: "{app}\thirdparty"; DestName: "python-installer.exe"; Flags: ignoreversion deleteafterinstall
+Source: "payload\Setup_com0com_v3.0.0.0_W7_x64_signed.exe"; DestDir: "{app}\thirdparty"; DestName: "com0com-installer.exe"; Flags: ignoreversion deleteafterinstall
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\install-vector.ps1"" -InstallRoot ""{app}"" -RadioKeyingPort ""{code:GetRadioKeyPort}"" -RadioKeyingBaud {code:GetRadioKeyBaud} -RigHost ""{code:GetRigHost}"" -RigPort {code:GetRigPort}"; Flags: runhidden waituntilterminated; StatusMsg: "Instalando runtime, portas COM e serviço GADX Vector..."
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\install-vector.ps1"" -InstallRoot ""{app}"""; Flags: runhidden waituntilterminated; StatusMsg: "Configurando GADX Vector..."
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\uninstall-vector.ps1"" -InstallRoot ""{app}"""; Flags: runhidden waituntilterminated skipifdoesntexist
-
-[Code]
-var
-  RadioPage: TInputQueryWizardPage;
-
-procedure InitializeWizard;
-begin
-  RadioPage := CreateInputQueryPage(
-    wpSelectDir,
-    'Interface do rádio',
-    'Configuração do rádio físico',
-    'Informe a porta de keying e o endpoint rigctld. Estes valores podem ser alterados depois em config\bridge.ini.'
-  );
-  RadioPage.Add('Porta COM para CW keying:', False);
-  RadioPage.Add('Baud da porta de keying:', False);
-  RadioPage.Add('Host do rigctld:', False);
-  RadioPage.Add('Porta TCP do rigctld:', False);
-  RadioPage.Values[0] := 'COM22';
-  RadioPage.Values[1] := '9600';
-  RadioPage.Values[2] := '127.0.0.1';
-  RadioPage.Values[3] := '4532';
-end;
-
-function GetRadioKeyPort(Param: String): String;
-begin
-  Result := RadioPage.Values[0];
-end;
-
-function GetRadioKeyBaud(Param: String): String;
-begin
-  Result := RadioPage.Values[1];
-end;
-
-function GetRigHost(Param: String): String;
-begin
-  Result := RadioPage.Values[2];
-end;
-
-function GetRigPort(Param: String): String;
-begin
-  Result := RadioPage.Values[3];
-end;
