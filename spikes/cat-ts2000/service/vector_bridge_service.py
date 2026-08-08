@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import configparser
-import os
 import socket
 import subprocess
 import sys
@@ -17,11 +16,23 @@ import servicemanager
 SERVICE_NAME = "GADXVectorBridge"
 SERVICE_DISPLAY_NAME = "GADX Vector Bridge"
 SERVICE_DESCRIPTION = "GADX Vector TS-2000 CAT/PTT/CW bridge"
+DEFAULT_ROOT = Path(r"C:\Ham\GADX-Vector")
+DEFAULT_LOG_MAX_MB = 5
+DEFAULT_LOG_BACKUPS = 5
 
 
-def program_data_dir() -> Path:
-    base = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
-    return base / "GADXVector"
+def install_root() -> Path:
+    # The service lives under <root>\service. Deriving the root from __file__
+    # keeps the installation relocatable if the user changes C:\Ham\GADX-Vector.
+    return Path(__file__).resolve().parent.parent
+
+
+def config_path() -> Path:
+    return install_root() / "config" / "bridge.ini"
+
+
+def log_dir() -> Path:
+    return install_root() / "logs"
 
 
 def read_bridge_config(path: Path) -> configparser.SectionProxy | None:
@@ -33,13 +44,10 @@ def read_bridge_config(path: Path) -> configparser.SectionProxy | None:
 
 
 def resolve_python_executable() -> Path:
-    """Return the real python.exe used to run child applications.
-
-    When a pywin32 service is running, sys.executable points to
-    pythonservice.exe. That executable is the Service Manager host and cannot
-    be used as a general Python interpreter for rigctld_bridge.py.
-    """
+    """Return the private Vector python.exe used for child applications."""
+    root = install_root()
     candidates = [
+        root / "runtime" / "python.exe",
         Path(sys.base_prefix) / "python.exe",
         Path(sys.prefix) / "python.exe",
         Path(sys.executable).with_name("python.exe"),
@@ -53,9 +61,45 @@ def resolve_python_executable() -> Path:
     )
 
 
-def force_safe_state(config_path: Path) -> None:
+def rotate_log(path: Path, max_bytes: int, backups: int) -> None:
+    """Rotate log before opening it, bounding disk use without extra deps."""
+    try:
+        if not path.exists() or path.stat().st_size < max_bytes:
+            return
+    except OSError:
+        return
+
+    if backups <= 0:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return
+
+    oldest = Path(f"{path}.{backups}")
+    try:
+        oldest.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    for index in range(backups - 1, 0, -1):
+        src = Path(f"{path}.{index}")
+        dst = Path(f"{path}.{index + 1}")
+        try:
+            if src.exists():
+                src.replace(dst)
+        except OSError:
+            pass
+
+    try:
+        path.replace(Path(f"{path}.1"))
+    except OSError:
+        pass
+
+
+def force_safe_state(path: Path) -> None:
     """Best-effort safety shutdown independent from the child process."""
-    section = read_bridge_config(config_path)
+    section = read_bridge_config(path)
     if section is None:
         return
 
@@ -92,31 +136,33 @@ class GADXVectorBridgeService(win32serviceutil.ServiceFramework):
         super().__init__(args)
         self.stop_event = win32event.CreateEvent(None, 0, 0, None)
         self.process: subprocess.Popen | None = None
-        self.root = program_data_dir()
-        self.config_path = self.root / "bridge.ini"
-        self.log_dir = self.root / "logs"
+        self.root = install_root()
+        self.config_path = config_path()
+        self.log_dir = log_dir()
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_handle = None
 
     def SvcStop(self):
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         win32event.SetEvent(self.stop_event)
 
     def _start_child(self) -> subprocess.Popen:
-        app_dir = Path(__file__).resolve().parent.parent
-        bridge_py = app_dir / "rigctld_bridge.py"
+        bridge_py = self.root / "app" / "rigctld_bridge.py"
         log_path = self.log_dir / "bridge-service.log"
         python_exe = resolve_python_executable()
+
+        section = read_bridge_config(self.config_path)
+        max_mb = section.getint("log_max_mb", fallback=DEFAULT_LOG_MAX_MB) if section else DEFAULT_LOG_MAX_MB
+        backups = section.getint("log_backups", fallback=DEFAULT_LOG_BACKUPS) if section else DEFAULT_LOG_BACKUPS
+        rotate_log(log_path, max(1, max_mb) * 1024 * 1024, max(0, backups))
+
         cmd = [str(python_exe), str(bridge_py), "--config", str(self.config_path)]
         servicemanager.LogInfoMsg(f"Starting GADX Vector bridge: {' '.join(cmd)}")
-
-        # Keep the handle owned by the child process lifetime. It is inherited
-        # through stdout/stderr redirection and closed automatically when the
-        # process terminates/service object is released.
-        log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
+        self.log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
         return subprocess.Popen(
             cmd,
-            cwd=str(app_dir),
-            stdout=log_handle,
+            cwd=str(self.root / "app"),
+            stdout=self.log_handle,
             stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -142,6 +188,11 @@ class GADXVectorBridgeService(win32serviceutil.ServiceFramework):
                     self.process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     self.process.kill()
+            if self.log_handle is not None:
+                try:
+                    self.log_handle.close()
+                except OSError:
+                    pass
             force_safe_state(self.config_path)
             servicemanager.LogInfoMsg("GADX Vector Bridge service stopped")
 
