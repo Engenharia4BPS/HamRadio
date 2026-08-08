@@ -158,11 +158,45 @@ log_level = INFO
 "@ | Set-Content -Path $Path -Encoding UTF8
 }
 
+function Invoke-PyWin32PostInstall {
+    Write-Host "Executando pywin32 post-install..." -ForegroundColor Cyan
+
+    # Forma oficial preferida (pywin32 >= 309).
+    & python -m pywin32_postinstall -install
+    if ($LASTEXITCODE -eq 0) { return }
+
+    Write-Host "Modulo pywin32_postinstall nao foi encontrado; tentando console script..." -ForegroundColor Yellow
+
+    $scriptsDir = (& python -c "import sysconfig; print(sysconfig.get_path('scripts'))").Trim()
+    $candidates = @(
+        (Join-Path $scriptsDir "pywin32_postinstall.exe"),
+        (Join-Path $scriptsDir "pywin32_postinstall.py"),
+        (Join-Path $scriptsDir "pywin32_postinstall")
+    )
+
+    foreach ($candidate in $candidates) {
+        if (-not (Test-Path $candidate)) { continue }
+        Write-Host "pywin32 post-install: $candidate" -ForegroundColor DarkGray
+        if ($candidate.ToLower().EndsWith('.py')) {
+            & python $candidate -install
+        }
+        else {
+            & $candidate -install
+        }
+        if ($LASTEXITCODE -eq 0) { return }
+    }
+
+    throw @"
+Nao foi possivel executar o pywin32 post-install.
+O pywin32 foi instalado, mas nem o modulo nem o console script foram encontrados/aceitos.
+Scripts pesquisados em: $scriptsDir
+"@
+}
+
 Assert-Administrator
 $setupc = Find-Setupc -Preferred $SetupcPath
 Write-Host "com0com: $setupc" -ForegroundColor DarkGray
 
-# Pre-flight do runtime ANTES de criar novas COMs.
 $runtimeRoot = $null
 if (-not $SkipService) {
     $runtimeRoot = Resolve-RuntimeRoot -Preferred $RepoRoot
@@ -175,8 +209,6 @@ $iniPath = Join-Path $programData "bridge.ini"
 $loggerIniPath = Join-Path $programData "logger.ini"
 New-Item -ItemType Directory -Force -Path $programData, $logDir | Out-Null
 
-# Se uma tentativa anterior ja chegou a gerar os INIs e os pares ainda existem,
-# retomamos exatamente a mesma instalacao em vez de consumir novas portas.
 $loggerCat = Get-IniComNumber -Path $loggerIniPath -Key "cat_port"
 $loggerKey = Get-IniComNumber -Path $loggerIniPath -Key "keying_port"
 $vectorCat = Get-IniComNumber -Path $iniPath -Key "port"
@@ -241,8 +273,7 @@ if (-not $SkipService) {
 
     & python -m pip install --upgrade pyserial pywin32
     if ($LASTEXITCODE -ne 0) { throw "Falha instalando pyserial/pywin32." }
-    & python -m pywin32_postinstall -install
-    if ($LASTEXITCODE -ne 0) { throw "Falha no pywin32_postinstall." }
+    Invoke-PyWin32PostInstall
 
     $serviceScript = Join-Path $serviceDir "vector_bridge_service.py"
     & python $serviceScript stop 2>$null | Out-Null
