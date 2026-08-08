@@ -35,6 +35,7 @@ function Write-Utf8NoBom([string]$Path, [string]$Content) {
 
 function Find-Com0comSetup {
     $candidates = @(
+        "C:\Ham\com0com\setupc.exe",
         "$env:ProgramFiles\com0com\setupc.exe",
         "${env:ProgramFiles(x86)}\com0com\setupc.exe"
     )
@@ -131,7 +132,9 @@ function Test-ComPair([int]$Left, [int]$Right) {
 
 function Ensure-PythonRuntime {
     if (-not (Test-Path $PythonExe)) {
-        if (-not (Test-Path $PythonInstaller)) { throw "Python installer payload not found: $PythonInstaller" }
+        if (-not (Test-Path $PythonInstaller)) {
+            throw "Private Python runtime is missing and repair payload was not found: $PythonInstaller"
+        }
         New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
         Write-Host "Installing private Python 3.10.11 runtime..."
         $args = @(
@@ -181,6 +184,7 @@ function Ensure-ComPairs {
 
     if ($null -ne $loggerCat -and $null -ne $loggerKey -and $null -ne $vectorCat -and $null -ne $vectorKey -and
         (Test-ComPair $loggerCat $vectorCat) -and (Test-ComPair $loggerKey $vectorKey)) {
+        Write-Host "Existing Vector COM pairs found; reusing them."
         return @($loggerCat,$loggerKey,$vectorCat,$vectorKey)
     }
 
@@ -196,8 +200,10 @@ function Ensure-ComPairs {
 }
 
 function Install-Service {
+    Write-Host "Repairing/reinstalling GADXVectorBridge service..."
     & $PythonExe $ServiceScript stop 2>$null | Out-Null
     & $PythonExe $ServiceScript remove 2>$null | Out-Null
+    Start-Sleep -Milliseconds 500
     & $PythonExe $ServiceScript install
     if ($LASTEXITCODE -ne 0) { throw "Failed to install GADXVectorBridge service." }
     & sc.exe config GADXVectorBridge start= delayed-auto | Out-Null
@@ -205,6 +211,13 @@ function Install-Service {
     & sc.exe failureflag GADXVectorBridge 1 | Out-Null
     & $PythonExe $ServiceScript start
     if ($LASTEXITCODE -ne 0) { throw "GADXVectorBridge service installed but did not start." }
+
+    Start-Sleep -Seconds 1
+    $service = Get-Service -Name GADXVectorBridge -ErrorAction SilentlyContinue
+    if (-not $service -or $service.Status -ne 'Running') {
+        throw "GADXVectorBridge service validation failed: service is not Running."
+    }
+    Write-Host "GADXVectorBridge service is Running."
 }
 
 Assert-Administrator
@@ -251,7 +264,7 @@ Write-Utf8NoBom $LoggerIni $logger
 Install-Service
 
 $summary = @"
-GADX Vector installed successfully.
+GADX Vector installed/repaired successfully.
 
 Logger configuration:
   Radio: Kenwood TS-2000
@@ -268,7 +281,7 @@ Radio:
   rigctld: ${RigHost}:$RigPort
   CW keying: $RadioKeyingPort @ $RadioKeyingBaud
 
-Service: GADXVectorBridge
+Service: GADXVectorBridge (Running)
 Install root: $InstallRoot
 "@
 Write-Utf8NoBom (Join-Path $InstallRoot 'config\install-summary.txt') $summary
