@@ -6,6 +6,10 @@ on:
     paths:
       - 'spikes/cat-ts2000/**'
       - '.github/workflows/build-gadx-vector-installer.yml'
+  pull_request:
+    paths:
+      - 'spikes/cat-ts2000/**'
+      - '.github/workflows/build-gadx-vector-installer.yml'
 
 permissions:
   contents: read
