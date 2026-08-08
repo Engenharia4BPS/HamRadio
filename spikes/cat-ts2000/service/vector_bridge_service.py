@@ -5,7 +5,6 @@ import os
 import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import serial
@@ -29,10 +28,29 @@ def read_bridge_config(path: Path) -> configparser.SectionProxy | None:
     cfg = configparser.ConfigParser()
     if not path.exists():
         return None
-    # utf-8-sig transparently accepts files both with and without a UTF-8 BOM.
-    # Windows PowerShell 5.1 writes a BOM when Set-Content -Encoding UTF8 is used.
     cfg.read(path, encoding="utf-8-sig")
     return cfg["bridge"] if "bridge" in cfg else None
+
+
+def resolve_python_executable() -> Path:
+    """Return the real python.exe used to run child applications.
+
+    When a pywin32 service is running, sys.executable points to
+    pythonservice.exe. That executable is the Service Manager host and cannot
+    be used as a general Python interpreter for rigctld_bridge.py.
+    """
+    candidates = [
+        Path(sys.base_prefix) / "python.exe",
+        Path(sys.prefix) / "python.exe",
+        Path(sys.executable).with_name("python.exe"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "Could not locate python.exe for GADX Vector child process; "
+        f"sys.executable={sys.executable!r}"
+    )
 
 
 def force_safe_state(config_path: Path) -> None:
@@ -87,9 +105,14 @@ class GADXVectorBridgeService(win32serviceutil.ServiceFramework):
         app_dir = Path(__file__).resolve().parent.parent
         bridge_py = app_dir / "rigctld_bridge.py"
         log_path = self.log_dir / "bridge-service.log"
-        log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
-        cmd = [sys.executable, str(bridge_py), "--config", str(self.config_path)]
+        python_exe = resolve_python_executable()
+        cmd = [str(python_exe), str(bridge_py), "--config", str(self.config_path)]
         servicemanager.LogInfoMsg(f"Starting GADX Vector bridge: {' '.join(cmd)}")
+
+        # Keep the handle owned by the child process lifetime. It is inherited
+        # through stdout/stderr redirection and closed automatically when the
+        # process terminates/service object is released.
+        log_handle = open(log_path, "a", encoding="utf-8", buffering=1)
         return subprocess.Popen(
             cmd,
             cwd=str(app_dir),
