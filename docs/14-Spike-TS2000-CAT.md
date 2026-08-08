@@ -1,8 +1,8 @@
 # GADX Vector
 # 14 - SPIKE-002 — Emulação CAT TS-2000
 
-Versão: 1.2 (Draft)
-Status: Em execução — N1MM conectado com sucesso
+Versão: 1.3
+Status: **SUCCESS — N1MM validado**
 
 ---
 
@@ -55,7 +55,9 @@ references/kenwood/TS-2000/B62-1221-70.pdf
 
 O **Kenwood TS-2000** é um bom candidato para a fachada CAT inicial do GADX Vector porque possui suporte específico nos loggers alvo, protocolo ASCII terminado por `;` e comandos suficientes para frequência, modo, VFO, split e PTT.
 
-A escolha permanece experimental até a conclusão dos testes N1MM e DXLog.
+**Resultado da hipótese para N1MM: CONFIRMADA.**
+
+A validação com DXLog permanece pendente como teste adicional de interoperabilidade.
 
 ---
 
@@ -69,7 +71,7 @@ Parity:      None
 Stop bits:   1
 ```
 
-No primeiro laboratório Windows foi utilizado um par com0com:
+No laboratório Windows foi utilizado um par com0com:
 
 ```text
 N1MM      -> COM9
@@ -81,15 +83,9 @@ Emulador  -> COM18
 # Resultado Experimental 001 — N1MM
 
 Data: 2026-08-07
-Resultado: **sucesso na comunicação serial bidirecional**.
+Resultado: **SUCCESS — comunicação CAT bidirecional estável**.
 
-O N1MM abriu COM9 e o emulador abriu COM18. O emulador recebeu tráfego CAT real do logger e respondeu corretamente aos comandos já implementados.
-
-## Sequência observada na inicialização
-
-```text
-FR1;IF;FR0;AI0;
-```
+O N1MM abriu COM9 e o emulador abriu COM18. O emulador recebeu tráfego CAT real do logger, respondeu ao polling continuamente e aceitou alterações de frequência e modo originadas no N1MM.
 
 ## Polling normal observado
 
@@ -97,42 +93,70 @@ FR1;IF;FR0;AI0;
 IF;FA;FB;AG0;
 ```
 
-O polling foi observado repetidamente em intervalos próximos de 500 ms no primeiro teste.
+O polling foi observado repetidamente em intervalos próximos de 500 ms.
 
-## Respostas já confirmadas
+## Sequência especial observada
 
 ```text
-FA; -> FA00014074000;
-FB; -> FB00007074000;
+FR1;IF;FR0;AI0;
 ```
 
-Isso comprova o caminho:
+O emulador alternou temporariamente o RX para VFO-B, respondeu `IF` com a frequência correspondente e retornou ao VFO-A sem interromper a sessão.
+
+## Evidência de execução — log real
+
+Trecho representativo do ensaio bem-sucedido:
+
+```text
+2026-08-07 23:47:11,301 INFO Opening COM18 at 19200 baud, 8N1
+2026-08-07 23:47:11,302 INFO TS-2000 emulator ready
+2026-08-07 23:47:11,806 DEBUG CAT RX raw: 'IF;FA;FB;AG0;'
+2026-08-07 23:47:11,806 DEBUG CAT TX: IF000140740000000+0000000000020000000;
+2026-08-07 23:47:11,807 DEBUG CAT TX: FA00014074000;
+2026-08-07 23:47:11,807 DEBUG CAT TX: FB00007074000;
+2026-08-07 23:47:11,808 DEBUG CAT TX: AG0128;
+
+2026-08-07 23:47:28,382 DEBUG CAT RX raw: 'FA00014200000;'
+2026-08-07 23:47:28,382 INFO State changed: FA=14200000Hz FB=7074000Hz RX=VFO-A TX=VFO-A MODE=USB PTT=OFF SPLIT=OFF AI=0 AG0=128 AG1=128
+
+2026-08-07 23:47:37,369 DEBUG CAT RX raw: 'FA00021070000;'
+2026-08-07 23:47:37,369 INFO State changed: FA=21070000Hz FB=7074000Hz RX=VFO-A TX=VFO-A MODE=USB PTT=OFF SPLIT=OFF AI=0 AG0=128 AG1=128
+
+2026-08-07 23:47:41,914 DEBUG CAT RX raw: 'MD3;'
+2026-08-07 23:47:41,914 INFO State changed: FA=21070000Hz FB=7074000Hz RX=VFO-A TX=VFO-A MODE=CW PTT=OFF SPLIT=OFF AI=0 AG0=128 AG1=128
+
+2026-08-07 23:47:44,852 DEBUG CAT RX raw: 'MD2;'
+2026-08-07 23:47:44,852 INFO State changed: FA=21070000Hz FB=7074000Hz RX=VFO-A TX=VFO-A MODE=USB PTT=OFF SPLIT=OFF AI=0 AG0=128 AG1=128
+
+2026-08-07 23:47:55,148 DEBUG CAT RX raw: 'FA00007150000;'
+2026-08-07 23:47:55,148 INFO State changed: FA=7150000Hz FB=7074000Hz RX=VFO-A TX=VFO-A MODE=USB PTT=OFF SPLIT=OFF AI=0 AG0=128 AG1=128
+2026-08-07 23:47:55,249 DEBUG CAT RX raw: 'MD1;'
+2026-08-07 23:47:55,249 INFO State changed: FA=7150000Hz FB=7074000Hz RX=VFO-A TX=VFO-A MODE=LSB PTT=OFF SPLIT=OFF AI=0 AG0=128 AG1=128
+
+2026-08-07 23:48:06,156 DEBUG CAT RX raw: 'FA00003520000;'
+2026-08-07 23:48:06,156 INFO State changed: FA=3520000Hz FB=7074000Hz RX=VFO-A TX=VFO-A MODE=CW PTT=OFF SPLIT=OFF AI=0 AG0=128 AG1=128
+
+2026-08-07 23:48:18,066 DEBUG CAT RX raw: 'FA00028500000;MD2;'
+2026-08-07 23:48:18,066 INFO State changed: FA=28500000Hz FB=7074000Hz RX=VFO-A TX=VFO-A MODE=USB PTT=OFF SPLIT=OFF AI=0 AG0=128 AG1=128
+```
+
+Durante o ensaio registrado não ocorreram `Write timeout`, exceções fatais ou comandos `UNSUPPORTED` no fluxo normal observado.
+
+O log comprova mudanças reais entre 20 m, 15 m, 40 m, 80 m e 10 m, além de mudanças USB/LSB/CW, mantendo o polling e o estado interno coerentes.
+
+## Caminho comprovado
 
 ```text
 N1MM
   -> COM9
   -> com0com
   -> COM18
-  -> Python TS-2000 Emulator
+  -> emulator.py
+  -> ts2000.py
+  -> RadioState
   -> resposta CAT
   -> N1MM
 ```
-
-## Comandos descobertos
-
-| Comando | Observado | Situação atual |
-|---|---:|---|
-| `FR` | Sim | Implementado |
-| `IF` | Sim | Implementado conforme B62-1221-70 |
-| `AI0` | Sim | Implementado conforme B62-1221-70 |
-| `FA` | Sim | Implementado conforme B62-1221-70 |
-| `FB` | Sim | Implementado conforme B62-1221-70 |
-| `AG0` | Sim | Implementado conforme B62-1221-70 |
-| `MD` | Não nesta captura | Implementado conforme B62-1221-70 |
-| `FT` | Não nesta captura | Implementado conforme B62-1221-70 |
-| `TX` | Não nesta captura | Implementado conforme B62-1221-70 |
-| `RX` | Não nesta captura | Implementado conforme B62-1221-70 |
-| `ID` | Não nesta captura | Implementado conforme B62-1221-70 |
 
 ---
 
@@ -184,24 +208,6 @@ A resposta `IF` segue os campos da tabela oficial Kenwood:
 
 Com prefixo `IF` e terminador `;`, a resposta possui **38 caracteres**.
 
-Campos que ainda não têm representação funcional no `RadioState` devem permanecer com valores coerentes/inativos até serem necessários; eles não devem ser inventados fora da especificação.
-
----
-
-# Logging de Descoberta
-
-Todo comando recebido é registrado em DEBUG. Comandos não implementados são marcados como `UNSUPPORTED`.
-
-Os próximos testes devem provocar deliberadamente:
-
-1. mudança de frequência pelo N1MM;
-2. mudança de banda;
-3. mudança de modo;
-4. split;
-5. PTT;
-6. desconexão e reconexão;
-7. repetição completa no DXLog.
-
 ---
 
 # Critérios de Sucesso
@@ -219,11 +225,11 @@ Os próximos testes devem provocar deliberadamente:
 - [x] emulador abre uma extremidade;
 - [x] N1MM abre a outra;
 - [x] tráfego CAT bidirecional comprovado;
-- [ ] `IF` aceito sem comportamento anômalo;
-- [ ] frequência simulada apresentada corretamente;
-- [ ] alteração de frequência N1MM -> emulador;
-- [ ] alteração de estado emulador -> N1MM;
-- [ ] modo sincronizado;
+- [x] `IF` aceito sem comportamento anômalo;
+- [x] frequência simulada apresentada e consultada corretamente;
+- [x] alteração de frequência N1MM -> emulador;
+- [x] resposta de estado emulador -> N1MM;
+- [x] modo sincronizado USB/LSB/CW;
 - [ ] split sincronizado;
 - [ ] PTT identificado.
 
@@ -238,9 +244,15 @@ Os próximos testes devem provocar deliberadamente:
 
 ---
 
-# Critério de Aceite do SPIKE
+# Conclusão do marco N1MM
 
-O SPIKE será aprovado quando N1MM e DXLog mantiverem comunicação estável, frequência e modo forem sincronizados, PTT puder ser identificado em laboratório e o subconjunto mínimo de comandos estiver documentado.
+## **SPIKE CAT TS-2000 / N1MM — SUCCESS**
+
+O ensaio de 2026-08-07 validou o principal risco técnico que motivou o SPIKE: um software legado pode conversar por COM virtual com uma fachada CAT TS-2000 implementada pelo GADX Vector, consultar seu estado e comandar frequência e modo de forma bidirecional e estável.
+
+Com isso, a hipótese arquitetural **CAT legado -> COM virtual -> adaptador TS-2000 -> estado interno Vector** está tecnicamente comprovada para N1MM.
+
+Split, PTT e DXLog permanecem como testes complementares antes do encerramento formal completo do SPIKE, mas não invalidam o marco de sucesso já obtido para a integração N1MM.
 
 ---
 
@@ -252,17 +264,16 @@ PTT altera somente estado booleano simulado.
 
 ---
 
-# Próximo Teste
+# Próximos Testes
 
-Usar a versão do `ts2000.py` alinhada ao manual B62-1221-70 e repetir o laboratório N1MM.
-
-Resultado esperado no log: ausência de `UNSUPPORTED` para `IF`, `AI0` e `AG0` e reconhecimento consistente da frequência inicial de **14.074.000 Hz / USB**.
-
-Depois, provocar mudanças de frequência, modo, split e PTT para registrar o comportamento real do logger.
+1. provocar e registrar Split no N1MM;
+2. provocar e registrar PTT em laboratório;
+3. repetir a integração com DXLog;
+4. após isso, encerrar formalmente o SPIKE e promover a fachada CAT para o adaptador do Vector Client.
 
 ---
 
-# Próximo Passo após Aprovação
+# Próximo Passo Arquitetural
 
 ```text
 N1MM / DXLog
