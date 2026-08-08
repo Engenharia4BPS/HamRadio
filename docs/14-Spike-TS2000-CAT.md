@@ -1,8 +1,8 @@
 # GADX Vector
 # 14 - SPIKE-002 — Emulação CAT TS-2000
 
-Versão: 1.0 (Draft)
-Status: Em execução
+Versão: 1.1 (Draft)
+Status: Em execução — N1MM conectado com sucesso
 
 ---
 
@@ -10,7 +10,7 @@ Status: Em execução
 
 Validar tecnicamente a camada de compatibilidade CAT do **Vector Client**, provando que **N1MM Logger+** e **DXLog** conseguem controlar um rádio virtual local apresentado como **Kenwood TS-2000** através de uma porta COM virtual.
 
-Este SPIKE não utiliza Vector Gateway, Hamlib, `rigctld` ou rádio físico. O objetivo é isolar e eliminar o risco técnico da borda local:
+Este SPIKE não utiliza Vector Gateway, Hamlib, `rigctld` ou rádio físico. O objetivo é isolar o risco técnico da borda local:
 
 ```text
 N1MM / DXLog
@@ -25,69 +25,17 @@ TS-2000 CAT Emulator
 Estado simulado
 ```
 
-Quando esta camada estiver validada, ela será conectada ao Vector Client e o estado simulado será substituído por comandos e eventos do Vector Protocol.
-
 ---
 
 # Hipótese
 
-O **Kenwood TS-2000** é um bom candidato para a fachada CAT inicial do GADX Vector porque:
+O **Kenwood TS-2000** é um bom candidato para a fachada CAT inicial do GADX Vector porque possui suporte específico nos loggers alvo, protocolo ASCII terminado por `;` e comandos suficientes para frequência, modo, VFO, split e PTT.
 
-- possui suporte específico no N1MM Logger+;
-- possui suporte específico no DXLog;
-- utiliza comandos ASCII curtos e terminados por `;`;
-- suporta leitura e escrita de frequência, modo, VFO, split e PTT;
-- permite implementação incremental do subconjunto realmente utilizado pelos loggers.
-
-A escolha ainda é experimental. O TS-2000 somente será adotado como fachada oficial após os testes deste SPIKE.
-
----
-
-# Referências verificadas
-
-## Kenwood
-
-A documentação oficial do TS-2000 define:
-
-- comandos de duas letras;
-- parâmetros de tamanho fixo por comando;
-- `;` como terminador;
-- `FA;` como leitura do VFO A;
-- `FA00007000000;` como exemplo de ajuste do VFO A para 7 MHz;
-- erro de formato representado por `?;`;
-- suporte a comandos como `FA`, `FB`, `FR`, `FT`, `ID`, `IF`, `MD`, `RX` e `TX`.
-
-Referência oficial:
-
-https://www.kenwood.com/jp/products/amateur/pdf/ts2000_pc_command_j.pdf
-
-## N1MM Logger+
-
-O N1MM possui seleção específica **TS-2000** e recomenda velocidade acima de 9600 baud, 8 data bits, sem paridade e 1 stop bit para velocidades superiores a 4800 baud.
-
-Referência:
-
-https://n1mmwp.hamdocs.com/manual-supported/supported-radios/
-
-## DXLog
-
-O DXLog possui suporte específico ao TS-2000 e recomenda:
-
-- 19200 bps;
-- 8 bits;
-- sem paridade;
-- 1 stop bit;
-- polling de aproximadamente 300 ms.
-
-Referência:
-
-https://www.dxlog.net/docs/index.php?title=Radios
+A escolha permanece experimental até a conclusão dos testes N1MM e DXLog.
 
 ---
 
 # Baseline de Laboratório
-
-Configuração inicial sugerida:
 
 ```text
 Radio model: Kenwood TS-2000
@@ -95,91 +43,120 @@ Speed:       19200 baud
 Data bits:   8
 Parity:      None
 Stop bits:   1
-Polling:     300 ms (DXLog)
 ```
 
-O controle de fluxo será validado empiricamente durante o SPIKE, pois aplicações e drivers de COM virtual podem tratar RTS/CTS de maneiras diferentes.
-
----
-
-# Estratégia de Implementação
-
-O emulador deve possuir duas camadas independentes:
+No primeiro laboratório Windows foi utilizado um par com0com:
 
 ```text
-Serial Transport
-      |
-      v
-TS2000 Parser / Emulator
-      |
-      v
-RadioState
+N1MM      -> COM9
+Emulador  -> COM18
 ```
-
-Essa separação permite testar o protocolo CAT sem precisar de uma porta COM real.
-
-## RadioState inicial
-
-O estado mínimo simulado inclui:
-
-- VFO A frequency;
-- VFO B frequency;
-- RX VFO;
-- TX VFO;
-- mode;
-- PTT;
-- split derivado de RX/TX VFO.
 
 ---
 
-# Subconjunto CAT inicial
+# Resultado Experimental 001 — N1MM
 
-## Implementado na primeira iteração
+Data: 2026-08-07
+Resultado: **sucesso na comunicação serial bidirecional**.
+
+O N1MM abriu COM9 e o emulador abriu COM18. O emulador recebeu tráfego CAT real do logger e respondeu corretamente aos comandos já implementados.
+
+## Sequência observada na inicialização
+
+```text
+FR1;IF;FR0;AI0;
+```
+
+## Polling normal observado
+
+```text
+IF;FA;FB;AG0;
+```
+
+O polling foi observado repetidamente em intervalos próximos de 500 ms no primeiro teste.
+
+## Respostas já confirmadas
+
+```text
+FA; -> FA00014074000;
+FB; -> FB00007074000;
+```
+
+Isso comprova o caminho:
+
+```text
+N1MM
+  -> COM9
+  -> com0com
+  -> COM18
+  -> Python TS-2000 Emulator
+  -> resposta CAT
+  -> N1MM
+```
+
+## Comandos descobertos
+
+| Comando | Observado | Situação após iteração 2 |
+|---|---:|---|
+| `FR` | Sim | Implementado |
+| `IF` | Sim | Implementado |
+| `AI0` | Sim | Implementado |
+| `FA` | Sim | Implementado |
+| `FB` | Sim | Implementado |
+| `AG0` | Sim | Implementado |
+| `MD` | Não nesta captura | Implementado |
+| `FT` | Não nesta captura | Implementado |
+| `TX` | Não nesta captura | Implementado |
+| `RX` | Não nesta captura | Implementado |
+| `ID` | Não nesta captura | Implementado |
+
+A captura real demonstrou que `IF`, `AI` e `AG` precisavam entrar já na segunda iteração.
+
+---
+
+# Subconjunto CAT implementado
 
 | Comando | Função |
 |---|---|
-| `ID` | Identificação do rádio |
-| `FA` | Ler/alterar frequência do VFO A |
-| `FB` | Ler/alterar frequência do VFO B |
-| `MD` | Ler/alterar modo |
-| `FR` | Ler/alterar VFO de recepção |
-| `FT` | Ler/alterar VFO de transmissão |
-| `TX` | Entrar em transmissão |
-| `RX` | Retornar à recepção |
+| `ID` | Identificação TS-2000 (`019`) |
+| `FA` | Frequência VFO A |
+| `FB` | Frequência VFO B |
+| `MD` | Modo |
+| `FR` | VFO de recepção |
+| `FT` | VFO de transmissão |
+| `TX` | Estado TX simulado |
+| `RX` | Estado RX simulado |
+| `IF` | Estado agregado do transceptor |
+| `AI` | Auto Information (`0`/`2`) |
+| `AG` | AF gain do transceptor principal |
 
-## Próximos comandos candidatos
-
-- `IF` — informação agregada do estado;
-- `AI` — Auto Information;
-- `PS` — Power status;
-- comandos adicionais observados nos logs de N1MM/DXLog.
-
-A implementação seguirá uma regra importante:
+A implementação seguirá a regra:
 
 > **Implementar somente comandos necessários e comprovadamente utilizados, mantendo logging completo dos comandos desconhecidos.**
 
-Isso evita recriar desnecessariamente todo o firmware CAT do TS-2000.
+---
+
+# Estrutura do IF
+
+A segunda iteração implementa a resposta `IF` conforme os campos definidos na tabela de comandos PC do TS-2000. O estado do SPIKE preenche dinamicamente frequência, RX/TX, modo, VFO e split; campos ainda não modelados são publicados como valores inativos seguros.
+
+Essa resposta deverá ser validada empiricamente pelo comportamento do N1MM. Caso o logger revele divergência de posição ou semântica, a captura real terá precedência e o emulador será corrigido.
 
 ---
 
 # Logging de Descoberta
 
-Todo comando recebido deve ser registrado em modo DEBUG.
+Todo comando recebido é registrado em DEBUG. Comandos não implementados são marcados como `UNSUPPORTED`.
 
-Comandos ainda não implementados devem ser claramente marcados como `UNSUPPORTED`.
+Os próximos testes devem provocar deliberadamente:
 
-O objetivo inicial é descobrir empiricamente quais comandos N1MM e DXLog utilizam durante:
-
-1. conexão;
-2. polling normal;
-3. mudança de frequência;
-4. mudança de banda;
-5. mudança de modo;
-6. split;
-7. PTT;
-8. desconexão/reconexão.
-
-Essa captura formará a **matriz real de compatibilidade CAT** do Vector Client.
+1. mudança de frequência pelo N1MM;
+2. mudança de banda;
+3. mudança de modo;
+4. split;
+5. PTT;
+6. desconexão e reconexão;
+7. repetição completa no DXLog.
 
 ---
 
@@ -187,85 +164,61 @@ Essa captura formará a **matriz real de compatibilidade CAT** do Vector Client.
 
 ## Etapa A — Parser
 
-- comandos podem chegar fragmentados em múltiplas leituras serial;
-- múltiplos comandos podem chegar em uma única leitura;
-- o parser separa corretamente mensagens pelo terminador `;`;
-- comandos inválidos não derrubam o processo.
+- [x] comandos fragmentados entre leituras;
+- [x] múltiplos comandos na mesma leitura;
+- [x] separação pelo terminador `;`;
+- [x] comando desconhecido não encerra o processo.
 
 ## Etapa B — N1MM
 
-1. Criar par de portas COM virtuais.
-2. Emulador abre uma extremidade.
-3. N1MM abre a outra extremidade.
-4. Selecionar rádio `TS-2000`.
-5. N1MM deve permanecer conectado.
-6. Frequência simulada deve aparecer no logger.
-7. Alteração de frequência no logger deve chegar ao emulador.
-8. Alteração de estado no emulador deve ser percebida pelo polling.
+- [x] par COM virtual criado;
+- [x] emulador abre uma extremidade;
+- [x] N1MM abre a outra;
+- [x] tráfego CAT bidirecional comprovado;
+- [ ] `IF` aceito sem comportamento anômalo;
+- [ ] frequência simulada apresentada corretamente;
+- [ ] alteração de frequência N1MM -> emulador;
+- [ ] alteração de estado emulador -> N1MM;
+- [ ] modo sincronizado;
+- [ ] split sincronizado;
+- [ ] PTT identificado.
 
 ## Etapa C — DXLog
 
-Repetir os testes utilizando DXLog com baseline 19200/8N1 e polling de 300 ms.
-
-## Etapa D — Captura
-
-Gerar relação de todos os comandos enviados por cada logger e classificá-los como:
-
-- obrigatório;
-- desejável;
-- opcional;
-- não necessário.
+- [ ] conexão;
+- [ ] frequência;
+- [ ] modo;
+- [ ] split;
+- [ ] PTT;
+- [ ] captura do polling real.
 
 ---
 
 # Critério de Aceite do SPIKE
 
-O SPIKE será considerado aprovado quando:
-
-- N1MM reconhecer e mantiver comunicação estável com o emulador;
-- DXLog reconhecer e mantiver comunicação estável com o emulador;
-- leitura e alteração de frequência funcionarem nos dois sentidos;
-- modo for corretamente sincronizado;
-- PTT puder ser identificado e alterado em laboratório;
-- o conjunto mínimo de comandos CAT necessários estiver documentado.
+O SPIKE será aprovado quando N1MM e DXLog mantiverem comunicação estável, frequência e modo forem sincronizados, PTT puder ser identificado em laboratório e o subconjunto mínimo de comandos estiver documentado.
 
 ---
 
 # Fora do Escopo
 
-Nesta fase não serão implementados:
+Nesta fase não entram Vector Gateway, Vector Protocol, Hamlib, `rigctld`, autenticação, Lease, rádio físico, áudio remoto ou transmissão RF real.
 
-- Vector Gateway;
-- Vector Protocol;
-- Hamlib;
-- `rigctld`;
-- autenticação;
-- Lease;
-- rádio físico;
-- áudio remoto;
-- transmissão RF real.
-
-PTT neste SPIKE altera apenas um estado booleano simulado.
+PTT altera somente estado booleano simulado.
 
 ---
 
-# Estrutura de Código
+# Próximo Teste
 
-```text
-spikes/cat-ts2000/
-├── README.md
-├── requirements.txt
-├── emulator.py
-├── ts2000.py
-└── tests/
-    └── test_ts2000.py
-```
+Substituir `ts2000.py` pela iteração 2 e repetir o laboratório N1MM.
+
+Resultado esperado no log: desaparecerem os avisos `UNSUPPORTED` para `IF`, `AI0` e `AG0`.
+
+Depois, confirmar visualmente se o N1MM reconhece a frequência inicial de **14.074.000 Hz / USB** e provocar mudanças de frequência para observar comandos `FAxxxxxxxxxxx;` enviados pelo logger.
 
 ---
 
 # Próximo Passo após Aprovação
-
-Após o SPIKE ser aprovado, a arquitetura evolui para:
 
 ```text
 N1MM / DXLog
@@ -285,5 +238,3 @@ Vector Protocol
       v
 Vector Gateway
 ```
-
-Nesse momento, alterações CAT deixarão de modificar `RadioState` local e passarão a produzir comandos normalizados do domínio Vector.
