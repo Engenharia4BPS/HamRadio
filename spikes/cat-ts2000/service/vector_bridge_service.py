@@ -29,7 +29,9 @@ def read_bridge_config(path: Path) -> configparser.SectionProxy | None:
     cfg = configparser.ConfigParser()
     if not path.exists():
         return None
-    cfg.read(path, encoding="utf-8")
+    # utf-8-sig transparently accepts files both with and without a UTF-8 BOM.
+    # Windows PowerShell 5.1 writes a BOM when Set-Content -Encoding UTF8 is used.
+    cfg.read(path, encoding="utf-8-sig")
     return cfg["bridge"] if "bridge" in cfg else None
 
 
