@@ -9,8 +9,7 @@ Versão: 1.0 (Draft)
 
 Este documento representa o Product Backlog oficial do GADX Vector.
 
-Seu objetivo é organizar toda a evolução funcional e técnica da plataforma,
-permitindo planejamento, priorização e rastreabilidade.
+Seu objetivo é organizar toda a evolução funcional e técnica da plataforma, permitindo planejamento, priorização e rastreabilidade.
 
 ---
 
@@ -68,8 +67,8 @@ Toda funcionalidade deverá estar vinculada a um Épico.
 
 ## Drivers
 
-- Hamlib Driver
-- rigctld Driver
+- Driver Interface
+- Hamlib Driver usando `rigctld` como backend preferencial
 - Dummy Driver
 
 ## Client
@@ -115,7 +114,7 @@ Prioridade: P0
 
 - Interface de Drivers
 - Hamlib Driver
-- rigctld Driver
+- Integração do Hamlib Driver com `rigctld`
 - Dummy Driver
 
 ---
@@ -179,7 +178,7 @@ Prioridade: P0
 
 ### Stories
 
-- Driver local
+- Integração nativa de COM virtual
 - Emulação CAT
 - Compatibilidade N1MM
 - Compatibilidade DXLog
@@ -228,82 +227,41 @@ Prioridade: P2
 
 ## US-001
 
-Como operador
-
-Quero selecionar um Site
-
-Para controlar seus Resources.
-
----
+Como operador, quero selecionar um Site para controlar seus Resources.
 
 ## US-002
 
-Como operador
-
-Quero reservar um Rádio
-
-Para evitar conflitos de operação.
-
----
+Como operador, quero reservar um Rádio para evitar conflitos de operação.
 
 ## US-003
 
-Como operador
-
-Quero alterar frequência
-
-Para operar remotamente.
-
----
+Como operador, quero alterar frequência para operar remotamente.
 
 ## US-004
 
-Como administrador
-
-Quero bloquear um Resource
-
-Para manutenção.
-
----
+Como administrador, quero bloquear um Resource para manutenção.
 
 ## US-005
 
-Como operador
-
-Quero reconectar automaticamente
-
-Após perda temporária da conexão.
+Como operador, quero reconectar automaticamente após perda temporária da conexão.
 
 ---
 
 # Technical Stories
 
 ## TS-001
-
 Implementar Driver Interface.
 
----
-
 ## TS-002
-
 Implementar Heartbeat.
 
----
-
 ## TS-003
-
 Implementar Lease Manager.
 
----
-
 ## TS-004
-
 Implementar Resource Discovery.
 
----
-
 ## TS-005
-
 Implementar Session Resume.
 
 ---
@@ -311,35 +269,25 @@ Implementar Session Resume.
 # Spikes
 
 ## SPIKE-001
-
-Avaliar Hamlib API versus rigctld.
-
----
+Validar a integração oficial Hamlib Driver + `rigctld`, incluindo comandos, polling, erros, capabilities e comportamento de reconexão.
 
 ## SPIKE-002
-
 Escolher o modelo CAT utilizado pela COM Virtual.
 
----
-
 ## SPIKE-003
-
-Avaliar WebSocket versus HTTP/2 para futuras versões.
-
----
+Avaliar transportes alternativos apenas para versões futuras, preservando WSS + JSON como decisão da v1 (ADR-011).
 
 ## SPIKE-004
-
 Avaliar suporte a mTLS.
 
 ---
 
-# Débito Técnico
+# Débito Técnico / Pesquisas Futuras
 
-- Avaliar Protobuf.
-- Avaliar QUIC.
-- Avaliar banco de dados.
-- Avaliar cache distribuído.
+- Avaliar Protobuf para versões futuras.
+- Avaliar QUIC para versões futuras.
+- Avaliar tecnologia de persistência/banco de dados.
+- Avaliar necessidade de cache distribuído quando houver escala que o justifique.
 
 ---
 
@@ -372,9 +320,9 @@ Uma funcionalidade será considerada concluída somente quando:
 - Documentação atualizada.
 - Compatibilidade validada.
 - Logs implementados.
-- Auditoria implementada (quando aplicável).
+- Auditoria implementada, quando aplicável.
 - Segurança revisada.
-- ADR atualizada (quando necessário).
+- ADR atualizada, quando necessário.
 
 ---
 
@@ -383,15 +331,15 @@ Uma funcionalidade será considerada concluída somente quando:
 | ID | Categoria | Status | Prioridade | Milestone |
 |----|-----------|---------|------------|-----------|
 | EPIC-001 | Gateway Core | Planejado | P0 | M1 |
-| EPIC-002 | Driver Framework | Planejado | P0 | M1 |
-| EPIC-003 | Session Manager | Planejado | P1 | M2 |
-| EPIC-004 | Resource Manager | Planejado | P1 | M2 |
-| EPIC-005 | Segurança | Planejado | P1 | M2 |
+| EPIC-002 | Driver Framework | Planejado | P0 | M2 |
+| EPIC-003 | Session Manager | Planejado | P1 | M1 |
+| EPIC-004 | Resource Manager | Planejado | P1 | M1 |
+| EPIC-005 | Segurança | Planejado | P1 | M5 |
 | EPIC-006 | Vector Client | Planejado | P1 | M3 |
-| EPIC-007 | COM Virtual | Planejado | P0 | M3 |
-| EPIC-008 | Interface Web | Planejado | P2 | M4 |
-| EPIC-009 | Resource Discovery | Planejado | P2 | M4 |
-| EPIC-010 | Multi Site | Planejado | P2 | M5 |
+| EPIC-007 | COM Virtual | Planejado | P0 | M4 |
+| EPIC-008 | Interface Web | Planejado | P2 | M3 |
+| EPIC-009 | Resource Discovery | Planejado | P2 | M1 |
+| EPIC-010 | Multi Site | Planejado | P2 | M6 |
 
 ---
 
@@ -399,4 +347,6 @@ Uma funcionalidade será considerada concluída somente quando:
 
 O Backlog é um documento vivo.
 
-Novas funcionalidades deverão ser adicionadas preservando a rastreabilidade, a priorização e a organização por Épicos, garantindo que a evolução do GADX Vector permaneça consistente ao longo de seu ciclo de vida.
+Novas funcionalidades deverão ser adicionadas preservando rastreabilidade, priorização e organização por Épicos.
+
+Decisões já formalizadas em ADR não devem permanecer como questões abertas no backlog; nesses casos, o backlog deve conter apenas atividades de validação ou implementação da decisão.
