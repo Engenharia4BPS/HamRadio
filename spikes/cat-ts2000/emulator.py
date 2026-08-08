@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-import time
 
 import serial
 
@@ -17,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="GADX Vector SPIKE: minimal Kenwood TS-2000 CAT emulator"
     )
-    parser.add_argument("--port", required=True, help="Serial port opened by the emulator, e.g. COM11")
+    parser.add_argument("--port", required=True, help="Serial port opened by the emulator, e.g. COM18")
     parser.add_argument("--baud", type=int, default=19200, help="Serial speed (default: 19200)")
     parser.add_argument("--timeout", type=float, default=0.1, help="Serial read timeout in seconds")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -44,7 +43,11 @@ def main() -> int:
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
             timeout=args.timeout,
-            write_timeout=1,
+            # com0com may temporarily block writes while the peer side is
+            # switching/opening the paired COM port. A finite write timeout
+            # caused the SPIKE to abort during N1MM initialization. Blocking
+            # writes are preferable for this isolated laboratory transport.
+            write_timeout=None,
         ) as cat_port:
             LOG.info("TS-2000 emulator ready")
 
@@ -64,9 +67,16 @@ def main() -> int:
                     LOG.info("State changed: %s", after)
 
                 for response in responses:
+                    payload = response.encode("ascii")
                     LOG.debug("CAT TX: %s", response)
-                    cat_port.write(response.encode("ascii"))
-                    cat_port.flush()
+                    written = cat_port.write(payload)
+                    if written != len(payload):
+                        LOG.warning(
+                            "Partial CAT write: %d/%d bytes for %r",
+                            written,
+                            len(payload),
+                            response,
+                        )
 
                 if radio.unsupported_commands:
                     while radio.unsupported_commands:
