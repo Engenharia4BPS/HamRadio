@@ -42,7 +42,7 @@ class RigSnapshot:
 class RigctldClient:
     """Small rigctld client using Hamlib's Extended Response Protocol.
 
-    Canonical protocol reference: rigctld(1).  Commands are prefixed with '+'
+    Canonical protocol reference: rigctld(1). Commands are prefixed with '+'
     so every reply ends with an explicit 'RPRT n' record, which makes framing
     robust for scripts.
     """
@@ -136,6 +136,10 @@ class RigctldClient:
     def set_mode(self, mode: str, passband_hz: int = 0) -> None:
         self.command("set_mode", mode, passband_hz)
 
+    def set_ptt(self, enabled: bool) -> None:
+        # Hamlib rigctld set_ptt uses 0=OFF and 1=ON.
+        self.command("set_ptt", 1 if enabled else 0)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -150,6 +154,11 @@ def parse_args() -> argparse.Namespace:
         "--allow-write",
         action="store_true",
         help="EXPERIMENTAL: allow N1MM FA/MD changes to change the physical radio through rigctld",
+    )
+    parser.add_argument(
+        "--allow-ptt",
+        action="store_true",
+        help="EXPERIMENTAL/DANGEROUS: allow N1MM TX/RX CAT commands to key the physical radio through rigctld",
     )
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return parser.parse_args()
@@ -177,13 +186,19 @@ def main() -> int:
         LOG.error("--poll-ms must be at least 50 ms")
         return 2
 
+    if args.allow_ptt and not args.allow_write:
+        LOG.error("--allow-ptt requires --allow-write")
+        return 2
+
     radio = TS2000Emulator()
     rig = RigctldClient(args.rig_host, args.rig_port)
+    physical_ptt_asserted = False
 
     LOG.info("GADX Vector rigctld bridge starting")
     LOG.info("CAT facade: %s @ %d 8N1", args.port, args.baud)
     LOG.info("Physical radio backend: rigctld %s:%d", args.rig_host, args.rig_port)
-    LOG.info("Mode: %s", "READ/WRITE (experimental)" if args.allow_write else "READ-ONLY (safe first test)")
+    LOG.info("CAT writes: %s", "ENABLED (experimental)" if args.allow_write else "DISABLED / READ-ONLY")
+    LOG.info("Physical PTT: %s", "ENABLED (experimental)" if args.allow_ptt else "DISABLED")
 
     try:
         rig.connect()
@@ -241,15 +256,21 @@ def main() -> int:
 
                 before_freq = radio.state.frequency_a_hz
                 before_mode = radio.state.mode_code
+                before_ptt = radio.state.ptt
+
                 responses = radio.feed(text)
+
                 requested_freq = radio.state.frequency_a_hz
                 requested_mode = radio.state.mode_code
+                requested_ptt = radio.state.ptt
 
                 # In safe read-only mode, N1MM may send set commands but they are
-                # intentionally not propagated to hardware.  Restore the most
-                # recently observed physical state immediately.
+                # intentionally not propagated to hardware. Restore the most
+                # recently observed physical state immediately. PTT is also reset
+                # locally so a blocked TX command does not leak into IF status.
                 if not args.allow_write:
                     apply_snapshot(radio, last_snapshot)
+                    radio.state.ptt = False
                 else:
                     if requested_freq != before_freq:
                         LOG.warning("N1MM -> PHYSICAL RADIO set frequency: %d Hz", requested_freq)
@@ -280,9 +301,24 @@ def main() -> int:
                         else:
                             LOG.warning("Cannot map TS-2000 mode code %s to Hamlib", requested_mode)
 
+                    if requested_ptt != before_ptt:
+                        if args.allow_ptt:
+                            LOG.warning(
+                                "N1MM -> PHYSICAL RADIO PTT %s",
+                                "ON" if requested_ptt else "OFF",
+                            )
+                            rig.set_ptt(requested_ptt)
+                            physical_ptt_asserted = requested_ptt
+                        else:
+                            LOG.warning(
+                                "Blocked N1MM PTT %s because --allow-ptt is not enabled",
+                                "ON" if requested_ptt else "OFF",
+                            )
+                            radio.state.ptt = False
+
                 for response in responses:
                     # Responses are regenerated from the current physical state
-                    # on the next logger poll.  Query responses in this batch are
+                    # on the next logger poll. Query responses in this batch are
                     # already based on the state present when feed() processed it.
                     LOG.debug("CAT TX: %s", response)
                     cat_port.write(response.encode("ascii"))
@@ -298,6 +334,14 @@ def main() -> int:
         LOG.error("Bridge error: %s", exc)
         return 2
     finally:
+        # Fail-safe: if this process ever asserted physical PTT, make a best-effort
+        # attempt to force RX before closing the rigctld connection.
+        if args.allow_ptt and physical_ptt_asserted:
+            try:
+                LOG.warning("Fail-safe shutdown: forcing physical PTT OFF")
+                rig.set_ptt(False)
+            except (OSError, ConnectionError, RuntimeError, ValueError) as exc:
+                LOG.error("Fail-safe PTT OFF failed: %s", exc)
         rig.close()
 
 
