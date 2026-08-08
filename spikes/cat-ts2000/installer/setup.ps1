@@ -32,17 +32,40 @@ function Find-Setupc {
     throw "Nao encontrei setupc.exe do com0com. Instale o com0com Signed ou informe -SetupcPath C:\caminho\setupc.exe"
 }
 
+function Invoke-Setupc {
+    param(
+        [string]$Setupc,
+        [string[]]$Arguments
+    )
+    # com0com's install command resolves com0com.inf relative to the current
+    # working directory. Run setupc.exe from its own installation directory,
+    # otherwise it may look for com0com.inf in the directory where setup.ps1
+    # was launched (for example Downloads).
+    $setupDir = Split-Path -Parent $Setupc
+    Push-Location $setupDir
+    try {
+        & $Setupc @Arguments
+        return $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 function Get-BusyComNumbers {
     param([string]$Setupc)
-    $output = & $Setupc --silent busynames 'COM?*' 2>&1
+    $setupDir = Split-Path -Parent $Setupc
+    Push-Location $setupDir
+    try {
+        $output = & $Setupc --silent busynames 'COM?*' 2>&1
+    }
+    finally {
+        Pop-Location
+    }
     $busy = [System.Collections.Generic.HashSet[int]]::new()
     foreach ($line in $output) {
         if ($line -match '^\s*COM(\d+)\s*$') { [void]$busy.Add([int]$Matches[1]) }
     }
-
-    # PowerShell normally enumerates collection objects returned from functions.
-    # The unary comma forces the HashSet itself to be returned as one object,
-    # otherwise the caller receives a fixed-size Object[] and .Add() fails.
     return ,$busy
 }
 
@@ -62,8 +85,8 @@ function Find-FreeCom {
 function Install-ComPair {
     param([string]$Setupc, [int]$Left, [int]$Right)
     Write-Host "Criando par COM$Left <-> COM$Right ..." -ForegroundColor Cyan
-    & $Setupc --wait 30 install "PortName=COM$Left" "PortName=COM$Right"
-    if ($LASTEXITCODE -ne 0) { throw "Falha ao criar par COM$Left/COM$Right (exit $LASTEXITCODE)." }
+    $exitCode = Invoke-Setupc -Setupc $Setupc -Arguments @('--wait', '30', 'install', "PortName=COM$Left", "PortName=COM$Right")
+    if ($exitCode -ne 0) { throw "Falha ao criar par COM$Left/COM$Right (exit $exitCode)." }
 }
 
 function Write-BridgeIni {
@@ -104,14 +127,10 @@ $setupc = Find-Setupc -Preferred $SetupcPath
 Write-Host "com0com: $setupc" -ForegroundColor DarkGray
 
 $busy = Get-BusyComNumbers -Setupc $setupc
-
-# Requisito: as duas portas apresentadas ao logger devem ficar entre COM10 e COM30.
 $loggerCat = Find-FreeCom -Busy $busy -Min 10 -Max 30
 [void]$busy.Add($loggerCat)
 $loggerKey = Find-FreeCom -Busy $busy -Min 10 -Max 30 -Exclude @($loggerCat)
 [void]$busy.Add($loggerKey)
-
-# As pontas internas do Vector podem usar numeros altos.
 $vectorCat = Find-FreeCom -Busy $busy -Min 100 -Max 199
 [void]$busy.Add($vectorCat)
 $vectorKey = Find-FreeCom -Busy $busy -Min 100 -Max 199 -Exclude @($vectorCat)
@@ -130,10 +149,8 @@ Install-ComPair -Setupc $setupc -Left $loggerKey -Right $vectorKey
 $programData = Join-Path $env:ProgramData "GADXVector"
 $logDir = Join-Path $programData "logs"
 New-Item -ItemType Directory -Force -Path $programData, $logDir | Out-Null
-
 $iniPath = Join-Path $programData "bridge.ini"
 Write-BridgeIni -Path $iniPath -VectorCat $vectorCat -VectorKeying $vectorKey -RadioKey $RadioKeyingPort -RadioKeyBaud $RadioKeyingBaud -HostName $RigHost -HostPort $RigPort
-
 @"
 [logger]
 cat_port = COM$loggerCat
@@ -141,38 +158,28 @@ keying_port = COM$loggerKey
 radio_model = TS-2000
 cat_baud = 19200
 "@ | Set-Content -Path (Join-Path $programData "logger.ini") -Encoding UTF8
-
 Write-Host "bridge.ini gerado em $iniPath" -ForegroundColor Green
 
 if (-not $SkipService) {
     Write-Host "Preparando runtime do servico..." -ForegroundColor Cyan
-
     $appDir = Join-Path $env:ProgramFiles "GADX Vector"
     $serviceDir = Join-Path $appDir "service"
     New-Item -ItemType Directory -Force -Path $appDir, $serviceDir | Out-Null
-
     Copy-Item (Join-Path $RepoRoot "rigctld_bridge.py") (Join-Path $appDir "rigctld_bridge.py") -Force
     Copy-Item (Join-Path $RepoRoot "ts2000.py") (Join-Path $appDir "ts2000.py") -Force
     Copy-Item (Join-Path $RepoRoot "service\vector_bridge_service.py") (Join-Path $serviceDir "vector_bridge_service.py") -Force
-
     & python -m pip install --upgrade pyserial pywin32
     if ($LASTEXITCODE -ne 0) { throw "Falha instalando pyserial/pywin32." }
-
     & python -m pywin32_postinstall -install
     if ($LASTEXITCODE -ne 0) { throw "Falha no pywin32_postinstall." }
-
     $serviceScript = Join-Path $serviceDir "vector_bridge_service.py"
-
     & python $serviceScript stop 2>$null | Out-Null
     & python $serviceScript remove 2>$null | Out-Null
-
     & python $serviceScript install
     if ($LASTEXITCODE -ne 0) { throw "Falha instalando o servico GADXVectorBridge." }
-
     & sc.exe config GADXVectorBridge start= delayed-auto | Out-Null
     & sc.exe failure GADXVectorBridge reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
     & sc.exe failureflag GADXVectorBridge 1 | Out-Null
-
     & python $serviceScript start
     if ($LASTEXITCODE -ne 0) { throw "Servico instalado, mas nao iniciou. Consulte Event Viewer e $logDir." }
 }
