@@ -1,5 +1,5 @@
 #define MyAppName "GADX Vector"
-#define MyAppVersion "0.1.0-dev"
+#define MyAppVersion "0.1.1-dev"
 #define MyAppPublisher "Araucaria DX Group / Engenharia 4BPS"
 
 [Setup]
@@ -35,8 +35,10 @@ Source: "..\..\ts2000.py"; DestDir: "{app}\app"; Flags: ignoreversion
 Source: "..\..\service\vector_bridge_service.py"; DestDir: "{app}\service"; Flags: ignoreversion
 Source: "install-vector.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "uninstall-vector.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
-Source: "payload\python-3.10.11-amd64.exe"; DestDir: "{app}\thirdparty"; DestName: "python-installer.exe"; Flags: ignoreversion deleteafterinstall
-Source: "payload\Setup_com0com_v3.0.0.0_W7_x64_signed.exe"; DestDir: "{app}\thirdparty"; DestName: "com0com-installer.exe"; Flags: ignoreversion deleteafterinstall
+; Keep third-party payloads installed so Repair/Reinstall can rebuild the
+; private Python runtime or reinstall com0com without requiring a fresh EXE.
+Source: "payload\python-3.10.11-amd64.exe"; DestDir: "{app}\thirdparty"; DestName: "python-installer.exe"; Flags: ignoreversion
+Source: "payload\Setup_com0com_v3.0.0.0_W7_x64_signed.exe"; DestDir: "{app}\thirdparty"; DestName: "com0com-installer.exe"; Flags: ignoreversion
 
 [Run]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\install-vector.ps1"" -InstallRoot ""{app}"""; Flags: runhidden waituntilterminated; StatusMsg: "Configurando GADX Vector..."
