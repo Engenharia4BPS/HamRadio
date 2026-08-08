@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import queue
 import socket
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -37,6 +39,13 @@ class RigSnapshot:
     frequency_hz: int
     mode: str
     passband_hz: int
+
+
+@dataclass(frozen=True)
+class KeyingEvent:
+    kind: str
+    enabled: bool
+    timestamp: float
 
 
 class RigctldClient:
@@ -137,28 +146,30 @@ class RigctldClient:
         self.command("set_mode", mode, passband_hz)
 
     def set_ptt(self, enabled: bool) -> None:
-        # Hamlib rigctld set_ptt uses 0=OFF and 1=ON.
+        # Hamlib rigctld set_ptt uses 0=RX and 1=TX.
         self.command("set_ptt", 1 if enabled else 0)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="GADX Vector SPIKE: bridge a real rigctld radio to the TS-2000 CAT facade"
+        description="GADX Vector SPIKE: unified TS-2000 CAT + serial keying bridge to rigctld"
     )
     parser.add_argument("--port", required=True, help="TS-2000 serial side, e.g. COM18")
     parser.add_argument("--baud", type=int, default=19200)
+    parser.add_argument("--keying-port", help="Optional serial-keying monitor side, e.g. COM32")
+    parser.add_argument("--keying-baud", type=int, default=19200)
     parser.add_argument("--rig-host", default="127.0.0.1")
     parser.add_argument("--rig-port", type=int, default=4532)
     parser.add_argument("--poll-ms", type=int, default=250, help="rigctld polling interval (default: 250 ms)")
     parser.add_argument(
         "--allow-write",
         action="store_true",
-        help="EXPERIMENTAL: allow N1MM FA/MD changes to change the physical radio through rigctld",
+        help="EXPERIMENTAL: allow CAT FA/MD changes to change the physical radio through rigctld",
     )
     parser.add_argument(
         "--allow-ptt",
         action="store_true",
-        help="EXPERIMENTAL/DANGEROUS: allow N1MM TX/RX CAT commands to key the physical radio through rigctld",
+        help="EXPERIMENTAL/DANGEROUS: allow CAT TX/RX and keying DTR to key the physical radio through rigctld",
     )
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return parser.parse_args()
@@ -173,6 +184,61 @@ def apply_snapshot(radio: TS2000Emulator, snapshot: RigSnapshot) -> None:
         return
 
     radio.state.mode_code = MODE_NAMES[mapped_name]
+
+
+def keying_worker(
+    port_name: str,
+    baud: int,
+    events: "queue.SimpleQueue[KeyingEvent]",
+    stop_event: threading.Event,
+) -> None:
+    """Capture N1MM serial keying without letting CAT polling hide short dits.
+
+    With the com0com mapping used by this SPIKE:
+      remote DTR (N1MM COM31) -> local DSR/DCD (Vector COM32) = PTT
+      remote RTS (N1MM COM31) -> local CTS     (Vector COM32) = CW key
+
+    The worker only observes modem-control lines and posts transitions to the
+    main bridge. It never talks to rigctld directly.
+    """
+    try:
+        with serial.Serial(
+            port=port_name,
+            baudrate=baud,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
+            timeout=0,
+            write_timeout=None,
+        ) as key_port:
+            last_ptt = bool(key_port.dsr or key_port.cd)
+            last_cw = bool(key_port.cts)
+            events.put(KeyingEvent("PTT", last_ptt, time.monotonic()))
+            events.put(KeyingEvent("CW", last_cw, time.monotonic()))
+            LOG.info(
+                "Keying interface ready on %s: DTR->DSR/DCD=PTT, RTS->CTS=CW",
+                port_name,
+            )
+
+            while not stop_event.is_set():
+                now = time.monotonic()
+                ptt = bool(key_port.dsr or key_port.cd)
+                cw = bool(key_port.cts)
+
+                if ptt != last_ptt:
+                    last_ptt = ptt
+                    events.put(KeyingEvent("PTT", ptt, now))
+
+                if cw != last_cw:
+                    last_cw = cw
+                    events.put(KeyingEvent("CW", cw, now))
+
+                # 1 ms sampling is comfortably below the ~46 ms dits observed
+                # from N1MM in the SPIKE while avoiding a busy-spin core.
+                time.sleep(0.001)
+    except serial.SerialException as exc:
+        LOG.error("Keying port error on %s: %s", port_name, exc)
+        events.put(KeyingEvent("ERROR", False, time.monotonic()))
 
 
 def main() -> int:
@@ -192,13 +258,44 @@ def main() -> int:
 
     radio = TS2000Emulator()
     rig = RigctldClient(args.rig_host, args.rig_port)
-    physical_ptt_asserted = False
 
-    LOG.info("GADX Vector rigctld bridge starting")
+    physical_ptt_asserted = False
+    cat_ptt_requested = False
+    keying_ptt_requested = False
+    cw_asserted_at: Optional[float] = None
+
+    keying_events: "queue.SimpleQueue[KeyingEvent]" = queue.SimpleQueue()
+    keying_stop = threading.Event()
+    keying_thread: Optional[threading.Thread] = None
+
+    LOG.info("GADX Vector unified bridge starting")
     LOG.info("CAT facade: %s @ %d 8N1", args.port, args.baud)
     LOG.info("Physical radio backend: rigctld %s:%d", args.rig_host, args.rig_port)
     LOG.info("CAT writes: %s", "ENABLED (experimental)" if args.allow_write else "DISABLED / READ-ONLY")
     LOG.info("Physical PTT: %s", "ENABLED (experimental)" if args.allow_ptt else "DISABLED")
+    LOG.info("Serial keying: %s", args.keying_port or "DISABLED")
+
+    def update_physical_ptt() -> None:
+        nonlocal physical_ptt_asserted
+        desired = bool(cat_ptt_requested or keying_ptt_requested)
+        if desired == physical_ptt_asserted:
+            return
+
+        if not args.allow_ptt:
+            LOG.warning(
+                "Blocked physical PTT %s because --allow-ptt is not enabled",
+                "ON" if desired else "OFF",
+            )
+            return
+
+        LOG.warning(
+            "BRIDGE -> PHYSICAL RADIO PTT %s (CAT=%s KEYING=%s)",
+            "ON" if desired else "OFF",
+            "ON" if cat_ptt_requested else "OFF",
+            "ON" if keying_ptt_requested else "OFF",
+        )
+        rig.set_ptt(desired)
+        physical_ptt_asserted = desired
 
     try:
         rig.connect()
@@ -211,20 +308,58 @@ def main() -> int:
             initial.passband_hz,
         )
 
+        if args.keying_port:
+            keying_thread = threading.Thread(
+                target=keying_worker,
+                args=(args.keying_port, args.keying_baud, keying_events, keying_stop),
+                name="vector-keying-monitor",
+                daemon=True,
+            )
+            keying_thread.start()
+
         with serial.Serial(
             port=args.port,
             baudrate=args.baud,
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
-            timeout=0.05,
+            timeout=0.01,
             write_timeout=None,
         ) as cat_port:
-            LOG.info("Bridge ready — open N1MM on the paired CAT COM port")
+            LOG.info("Bridge ready — open N1MM on the paired CAT/keying COM ports")
             next_poll = 0.0
             last_snapshot = initial
 
             while True:
+                # Drain high-resolution serial-keying events first.
+                while True:
+                    try:
+                        event = keying_events.get_nowait()
+                    except queue.Empty:
+                        break
+
+                    if event.kind == "ERROR":
+                        raise serial.SerialException("keying monitor stopped after a serial error")
+
+                    if event.kind == "PTT":
+                        keying_ptt_requested = event.enabled
+                        LOG.info("KEYING PTT %s (remote DTR)", "ON" if event.enabled else "OFF")
+                        update_physical_ptt()
+                        continue
+
+                    if event.kind == "CW":
+                        if event.enabled:
+                            cw_asserted_at = event.timestamp
+                            LOG.info("CW ON  (remote RTS)")
+                        else:
+                            if cw_asserted_at is not None:
+                                pulse_ms = (event.timestamp - cw_asserted_at) * 1000.0
+                                LOG.info("CW OFF (pulse %.1f ms)", pulse_ms)
+                            else:
+                                LOG.info("CW OFF")
+                            cw_asserted_at = None
+                        continue
+
                 now = time.monotonic()
                 if now >= next_poll:
                     try:
@@ -243,6 +378,10 @@ def main() -> int:
                         time.sleep(0.5)
                         try:
                             rig.connect()
+                            # Re-assert requested PTT state after reconnect only
+                            # through the same guarded path.
+                            physical_ptt_asserted = False
+                            update_physical_ptt()
                         except OSError as reconnect_exc:
                             LOG.error("rigctld reconnect failed: %s", reconnect_exc)
                     next_poll = now + (args.poll_ms / 1000.0)
@@ -264,16 +403,13 @@ def main() -> int:
                 requested_mode = radio.state.mode_code
                 requested_ptt = radio.state.ptt
 
-                # In safe read-only mode, N1MM may send set commands but they are
-                # intentionally not propagated to hardware. Restore the most
-                # recently observed physical state immediately. PTT is also reset
-                # locally so a blocked TX command does not leak into IF status.
                 if not args.allow_write:
                     apply_snapshot(radio, last_snapshot)
                     radio.state.ptt = False
+                    cat_ptt_requested = False
                 else:
                     if requested_freq != before_freq:
-                        LOG.warning("N1MM -> PHYSICAL RADIO set frequency: %d Hz", requested_freq)
+                        LOG.warning("CAT -> PHYSICAL RADIO set frequency: %d Hz", requested_freq)
                         rig.set_frequency(requested_freq)
                         last_snapshot = rig.get_snapshot()
                         apply_snapshot(radio, last_snapshot)
@@ -294,7 +430,7 @@ def main() -> int:
                         }
                         hamlib_mode = reverse.get(ts_mode_name or "")
                         if hamlib_mode:
-                            LOG.warning("N1MM -> PHYSICAL RADIO set mode: %s", hamlib_mode)
+                            LOG.warning("CAT -> PHYSICAL RADIO set mode: %s", hamlib_mode)
                             rig.set_mode(hamlib_mode, 0)
                             last_snapshot = rig.get_snapshot()
                             apply_snapshot(radio, last_snapshot)
@@ -302,24 +438,11 @@ def main() -> int:
                             LOG.warning("Cannot map TS-2000 mode code %s to Hamlib", requested_mode)
 
                     if requested_ptt != before_ptt:
-                        if args.allow_ptt:
-                            LOG.warning(
-                                "N1MM -> PHYSICAL RADIO PTT %s",
-                                "ON" if requested_ptt else "OFF",
-                            )
-                            rig.set_ptt(requested_ptt)
-                            physical_ptt_asserted = requested_ptt
-                        else:
-                            LOG.warning(
-                                "Blocked N1MM PTT %s because --allow-ptt is not enabled",
-                                "ON" if requested_ptt else "OFF",
-                            )
-                            radio.state.ptt = False
+                        cat_ptt_requested = requested_ptt
+                        LOG.info("CAT PTT %s", "ON" if requested_ptt else "OFF")
+                        update_physical_ptt()
 
                 for response in responses:
-                    # Responses are regenerated from the current physical state
-                    # on the next logger poll. Query responses in this batch are
-                    # already based on the state present when feed() processed it.
                     LOG.debug("CAT TX: %s", response)
                     cat_port.write(response.encode("ascii"))
 
@@ -334,6 +457,10 @@ def main() -> int:
         LOG.error("Bridge error: %s", exc)
         return 2
     finally:
+        keying_stop.set()
+        if keying_thread is not None:
+            keying_thread.join(timeout=1.0)
+
         # Fail-safe: if this process ever asserted physical PTT, make a best-effort
         # attempt to force RX before closing the rigctld connection.
         if args.allow_ptt and physical_ptt_asserted:
