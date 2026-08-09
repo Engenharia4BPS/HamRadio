@@ -1,225 +1,427 @@
 # GADX Vector — TS-2000 CAT SPIKE
 
-Protótipo isolado para validar a fachada **Kenwood TS-2000** entre loggers de contest e um rádio físico controlado pelo GADX Vector.
+Protótipo isolado para validar a fachada **Kenwood TS-2000** entre softwares de rádio/loggers e um rádio físico controlado pelo GADX Vector.
 
-## Status: VALIDADO COM N1MM LOGGER+
+## Status atual: VALIDADO EM MÚLTIPLAS INSTALAÇÕES
 
-O SPIKE foi validado em bancada com **N1MM Logger+** e funcionou 100% no fluxo testado:
+O SPIKE evoluiu de uma bridge single-client para um **hub CAT/keying multi-client**.
 
-- N1MM reconhece a interface como TS-2000;
-- leitura e alteração de frequência via CAT;
+Foi validado em bancada e depois repetido em outras instalações com sucesso nos seguintes pontos:
+
+- fachada CAT TS-2000 apresentada aos softwares;
+- leitura e alteração de frequência;
 - leitura e alteração de modo;
-- PTT encaminhado ao rádio físico;
-- CW keying em tempo real encaminhado ao rádio físico;
-- mensagem CW gerada pelo N1MM transmitida corretamente pelo rádio.
+- múltiplos clientes CAT simultâneos, cada um em sua própria COM virtual;
+- keying serial configurável por cliente;
+- PTT por DTR ou RTS;
+- CW por DTR ou RTS;
+- caminho CW low-latency, fora do loop de CAT/rigctld;
+- PTT consolidado por OR lógico entre clientes;
+- CW consolidado por OR lógico entre clientes, com aviso de colisão;
+- uso com rádio físico atrás do `rigctld`/Hamlib;
+- operação testada com N1MM Logger+, LogHX, MMTTY e outros clientes CAT/keying durante o SPIKE.
 
-O teste fecha a cadeia completa:
-
-```text
-N1MM Logger+
-   |
-   | CAT TS-2000 / COM virtual
-   v
-GADX Vector - rigctld_bridge.py
-   |
-   +---------------- CAT / Hamlib ----------------> rigctld -> rádio físico
-   |
-   +---------------- PTT --------------------------> rádio físico
-   |
-   +---------------- CW keying RTS ----------------> porta USB(B) do rádio
-```
-
-Este SPIKE deixou de ser apenas uma prova do parser TS-2000: ele demonstrou que podemos usar o TS-2000 como **fachada CAT para o logger**, mantendo o rádio físico atrás da camada Vector/Hamlib.
-
-## Configuração validada em bancada
-
-Configuração utilizada no teste bem-sucedido:
+A ideia central validada é:
 
 ```text
-N1MM CAT:           COM9  / TS-2000 / 19200 baud
-N1MM CW/PTT:        COM31
+Software A CAT ---- COM virtual ----\
+Software B CAT ---- COM virtual -----+--> GADX Vector --> rigctld --> rádio físico
+Software C CAT ---- COM virtual ----/
 
-Vector CAT:         COM18
-Vector keying input: COM32
-
-Rádio físico CAT:   COM20 -> rigctld
-Rádio físico CW:    COM22 -> RTS
+Software A keying -- COM virtual ---\
+Software B keying -- COM virtual ----+--> keying hub --> COM física --> PTT/CW do rádio
+Software C keying -- COM virtual ---/
 ```
 
-Os pares COM virtuais ficam conceitualmente assim:
+## Arquivos principais
+
+- `ts2000.py` — emulador/compatibilidade CAT Kenwood TS-2000;
+- `rigctld_bridge.py` — geração single-client anterior do SPIKE;
+- `rigctld_bridge_multi.py` — geração multi-client atual;
+- `bridge.ini` — exemplo legado/single-client;
+- `bridge_multi.ini` — exemplo atual multi-client;
+- `service/vector_bridge_service.py` — wrapper de serviço Windows usado durante os testes.
+
+## Evolução arquitetural
+
+### Primeira versão
+
+A primeira bridge tinha uma única CAT e uma única entrada de keying:
 
 ```text
-N1MM COM9  <------ virtual null modem ------> COM18 Vector CAT
-N1MM COM31 <------ virtual null modem ------> COM32 Vector keying
+Logger CAT --> COM virtual --> Vector --> rigctld
+Logger CW  --> COM virtual --> Vector --> COM física
 ```
 
-## Fluxo CAT
+Ela provou a compatibilidade TS-2000 e o fluxo completo com N1MM.
 
-O N1MM conversa exclusivamente com uma fachada TS-2000.
+### Problema encontrado em CW
+
+No primeiro desenho, eventos CW passavam por uma fila e eram processados no mesmo fluxo que CAT/polling do `rigctld`.
+
+Em velocidades de contest isso introduzia jitter suficiente para deformar pontos, traços e espaçamentos.
+
+A correção foi separar o keying em thread dedicado:
 
 ```text
-N1MM
-  |
-  | Kenwood TS-2000 CAT
-  v
-COM9 <-> COM18
-          |
-          v
-  rigctld_bridge.py
-          |
-          | Hamlib rigctld
-          v
-       rádio real
+ANTES
+COM keying --> Queue --> loop CAT/rigctld --> COM física
+
+AGORA
+COM keying --> thread low-latency --> COM física
 ```
 
-Assim, o logger não precisa conhecer o modelo real do equipamento conectado atrás do Vector.
+O caminho de CW não espera mais consultas de frequência/modo nem chamadas bloqueantes ao `rigctld`.
 
-## Fluxo CW
+## Hub CAT multi-client
 
-O CW não é decodificado nem reconstruído pela bridge.
+Cada programa recebe sua própria COM virtual. O Vector abre a outra ponta de cada par.
 
-A temporização produzida pelo N1MM é encaminhada em tempo real através das linhas seriais:
+Exemplo:
 
 ```text
-N1MM COM31 RTS
-      |
-      v
-COM32 CTS
-      |
-      | detecção de KEY DOWN / KEY UP
-      v
-rigctld_bridge.py
-      |
-      v
-COM22 RTS
-      |
-      v
-CW KEY do rádio físico
+Software         lado software    lado Vector
+---------------------------------------------
+LogHX            COM28      <->   COM101
+N1MM             COM26      <->   COM103
+Terceiro CAT     COM25      <->   COM105
+OmniRig          COM20      <->   COM107
 ```
 
-Exemplo conceitual:
+No INI:
+
+```ini
+[cat]
+ports = COM101, COM103, COM105, COM107
+baud = 19200
+```
+
+Não existe variável `ids`/quantidade. A própria lista define quantos clientes existem.
+
+Cada porta CAT recebe uma instância independente do `TS2000Emulator`, enquanto o acesso ao mesmo `RigctldClient` é serializado por lock.
+
+Conceitualmente:
 
 ```text
-N1MM:       RTS ON  ---------------- RTS OFF
-                       47 ms
-
-Vector:     CTS ON  -> evento CW -> CTS OFF
-
-Rádio:      RTS ON  ---------------- RTS OFF
-            KEY DOWN                  KEY UP
+CAT COM101 --\
+CAT COM103 ---+--> workers TS-2000 --> lock --> rigctld --> rádio
+CAT COM105 ---+
+CAT COM107 --/
 ```
 
-A bridge preserva a temporização enviada pelo logger em vez de tentar interpretar caracteres Morse.
+## Keying multi-client
 
-## Fluxo PTT
+O formato do INI é:
 
-PTT pode chegar tanto pelo CAT quanto pela entrada de keying.
+```ini
+[keying]
+client1 = COM102,DTR,RTS
+client2 = COM104,DTR,NONE
+client3 = COM106,RTS,DTR
+```
 
-A bridge consolida essas solicitações antes de alterar o PTT físico:
+Formato:
 
 ```text
-CAT PTT -------+
-                +----> estado PTT desejado ----> rigctld ----> rádio
-Keying PTT ----+
+clientN = PORTA_VECTOR,PTT_INPUT,CW_INPUT
 ```
 
-O envio físico de PTT exige explicitamente:
+Valores aceitos para PTT/CW de entrada:
 
 ```text
---allow-write --allow-ptt
+DTR
+RTS
+NONE
 ```
+
+Exemplo interpretado:
+
+```text
+client1 = COM102,DTR,RTS
+                 |   |
+                 |   +-- CW vem do RTS do software
+                 +------ PTT vem do DTR do software
+
+client2 = COM104,DTR,NONE
+                 |
+                 +------ somente PTT
+
+client3 = COM106,RTS,DTR
+                 |   |
+                 |   +-- CW vem do DTR
+                 +------ PTT vem do RTS
+```
+
+No com0com, devido ao cross-wiring dos sinais:
+
+```text
+DTR do lado do software --> DSR/DCD no lado Vector
+RTS do lado do software --> CTS no lado Vector
+```
+
+## Saída física de keying
+
+A saída física é centralizada:
+
+```ini
+[radio_keying]
+port = COM4
+baud = 19200
+ptt_line = RTS
+cw_line = DTR
+```
+
+Isso permite adaptar rádios/interfaces diferentes apenas pelo INI.
+
+Exemplos observados no SPIKE:
+
+```text
+IC-746PRO / interface testada:
+PTT = RTS
+CW  = DTR
+
+Outra instalação testada anteriormente:
+PTT = DTR
+CW  = RTS
+```
+
+A bridge não precisa conhecer o modelo do rádio para decidir isso.
+
+## OR lógico de PTT
+
+Todos os clientes podem solicitar PTT.
+
+O rádio permanece em TX enquanto pelo menos uma fonte estiver ativa:
+
+```text
+PTT_RADIO = CAT/PTT1 OR KEYING1 OR KEYING2 OR KEYING3 ...
+```
+
+Isso evita que um cliente solte o PTT enquanto outro ainda precisa transmitir.
+
+## OR lógico de CW
+
+A versão multi-client também mantém estado de CW por cliente:
+
+```text
+CW_RADIO = CW1 OR CW2 OR CW3 ...
+```
+
+Se dois clientes entrarem em CW ao mesmo tempo, o estado físico continua consistente, mas a bridge registra `WARNING` de colisão.
+
+Operacionalmente, duas aplicações não deveriam transmitir Morse simultaneamente.
+
+## Exemplo atual de `bridge_multi.ini`
+
+```ini
+[cat]
+; COM101 <-> COM28 = LogHX
+; COM103 <-> COM26 = N1MM
+; COM105 <-> COM25 = terceiro cliente CAT
+; COM107 <-> COM20 = OmniRig
+ports = COM101, COM103, COM105, COM107
+baud = 19200
+
+[keying]
+; COM102 <-> COM30 = Logger - PTT via DTR / CW via RTS
+; COM104 <-> COM27 = MMTTY - PTT via DTR / sem CW
+; COM106 <-> COM29 = Nexus - PTT via RTS / CW via DTR
+client1 = COM102,DTR,RTS
+client2 = COM104,DTR,NONE
+client3 = COM106,RTS,DTR
+
+[radio_keying]
+port = COM4
+baud = 19200
+ptt_line = RTS
+cw_line = DTR
+
+[rig]
+host = 127.0.0.1
+port = 4532
+poll_ms = 250
+
+[bridge]
+allow_write = true
+allow_ptt = true
+allow_cw = true
+log_level = INFO
+log_max_mb = 5
+log_backups = 5
+```
+
+Use `;` ou `#` no início da linha para comentários em arquivos INI.
+
+## com0com
+
+Os testes foram feitos com pares de portas virtuais com0com.
+
+Exemplos de comandos no `setupc.exe`/Setup Command Prompt:
+
+```text
+install PortName=COM28 PortName=COM101
+install PortName=COM30 PortName=COM102
+install PortName=COM26 PortName=COM103
+install PortName=COM27 PortName=COM104
+install PortName=COM25 PortName=COM105
+install PortName=COM29 PortName=COM106
+```
+
+Para conferir:
+
+```text
+list
+```
+
+O conceito adotado é manter, quando possível:
+
+```text
+COM baixa (< 30)  = lado do software
+COM 100+          = lado interno do Vector
+```
+
+Isso ajuda programas antigos que não lidam bem com números altos de COM.
+
+## MMTTY
+
+No SPIKE, o MMTTY pode receber uma CAT dedicada e uma porta dedicada de PTT.
+
+Exemplo:
+
+```text
+MMTTY CAT: COM26 <-> COM103
+MMTTY PTT: COM27 <-> COM104
+```
+
+No `bridge_multi.ini`:
+
+```ini
+[cat]
+ports = COM101, COM103
+
+[keying]
+client1 = COM102,DTR,RTS
+client2 = COM104,DTR,NONE
+```
+
+A engine do MMTTY possui também mecanismos próprios de integração via mensagens Windows. Isso pode ser estudado futuramente como adapter nativo, mas não é necessário para validar a arquitetura genérica de COMs virtuais.
+
+## rigctld / Hamlib
+
+O rádio físico continua atrás do Hamlib:
+
+```ini
+[rig]
+host = 127.0.0.1
+port = 4532
+poll_ms = 250
+```
+
+A bridge multi-client compartilha um único cliente `rigctld`, protegido por lock para impedir que múltiplos CAT workers misturem comandos/respostas no mesmo socket.
+
+## Executar a versão multi-client
+
+Exemplo em PowerShell:
+
+```powershell
+python rigctld_bridge_multi.py `
+  --config .\bridge_multi.ini
+```
+
+Na instalação de teste do Vector:
+
+```powershell
+& "C:\Ham\GADX-Vector\runtime\python.exe" `
+  "C:\Ham\GADX-Vector\app\rigctld_bridge_multi.py" `
+  --config "C:\Ham\GADX-Vector\config\bridge_multi.ini"
+```
+
+Saída esperada:
+
+```text
+CAT ports: COM101,COM103,... @ 19200
+Keying clients: client1:COM102, client2:COM104, ...
+Physical keying: COM4 @ 19200 PTT=RTS CW=DTR
+Connected to rigctld
+CAT client ready: COM101 @ 19200
+CAT client ready: COM103 @ 19200
+Keying client1 ready: COM102 PTT=DTR CW=RTS
+Bridge ready
+```
+
+## Log level e CW
+
+Para diagnóstico:
+
+```ini
+log_level = DEBUG
+```
+
+Para operação/teste de CW em velocidade de contest, prefira:
+
+```ini
+log_level = INFO
+```
+
+Evitar logging excessivo no caminho de keying reduz I/O concorrente e ajuda a manter a temporização limpa.
 
 ## Fail-safe
 
-CW e PTT possuem desligamento de segurança independente.
-
-Na abertura da porta física de keying:
+Na abertura da porta física:
 
 ```text
 RTS = OFF
 DTR = OFF
 ```
 
-Ao encerrar a bridge, inclusive após erro:
+Na saída da bridge:
 
 ```text
-CW KEY UP -> RTS OFF
-PTT OFF   -> rigctld set_ptt 0
+RTS = OFF
+DTR = OFF
+PTT rigctld = OFF (best effort)
 ```
 
-Isso reduz o risco de deixar o rádio preso em TX ou com a chave CW acionada após uma interrupção do processo.
+O objetivo é não deixar rádio/interface presos em TX ou CW após falha do processo.
 
-## Requisitos
+## Serviço Windows
 
-- Python 3.9+;
-- `pyserial`;
-- Hamlib / `rigctld` para acesso ao rádio físico;
-- pares de portas seriais virtuais no Windows;
-- porta serial física configurada para CW por RTS quando o keying direto for utilizado.
+Durante o SPIKE foi criado `service/vector_bridge_service.py` para manter a bridge rodando como serviço Windows e fazer rotação de logs.
 
-Instalação:
-
-```powershell
-cd spikes\cat-ts2000
-python -m venv .venv
-.venv\Scripts\activate
-python -m pip install -r requirements.txt
-```
-
-## Executar somente o emulador
-
-Para testes sem rádio físico:
-
-```powershell
-python emulator.py --port COM18 --baud 19200 --log-level DEBUG
-```
-
-## Executar a bridge validada
-
-Com a configuração utilizada no teste:
-
-```powershell
-python rigctld_bridge.py `
-  --port COM18 `
-  --keying-port COM32 `
-  --radio-keying-port COM22 `
-  --radio-keying-baud 9600 `
-  --rig-host 127.0.0.1 `
-  --rig-port 4532 `
-  --allow-write `
-  --allow-ptt `
-  --allow-cw `
-  --log-level DEBUG
-```
-
-Em CMD, use uma única linha:
-
-```cmd
-python rigctld_bridge.py --port COM18 --keying-port COM32 --radio-keying-port COM22 --radio-keying-baud 9600 --rig-host 127.0.0.1 --rig-port 4532 --allow-write --allow-ptt --allow-cw --log-level DEBUG
-```
-
-> `--allow-cw` habilita keying real no rádio. Use potência/carga/antena adequadas durante testes.
-
-## N1MM Logger+
-
-Configuração CAT validada:
+A instalação de desenvolvimento adotou:
 
 ```text
-Radio:     TS-2000
-Port:      COM9
-Baud:      19200
-Data bits: 8
-Parity:    None
-Stop bits: 1
+C:\Ham\GADX-Vector\
 ```
 
-A porta de CW/PTT do N1MM foi configurada na outra extremidade do segundo par virtual (`COM31` no teste).
+com runtime Python privado.
 
-## Comandos TS-2000
+O wrapper atual ainda está ligado ao layout `bridge.ini`/`rigctld_bridge.py`. Ao promover a versão multi-client para a bridge oficial, o próximo ajuste deve fazer o serviço entender diretamente as seções:
 
-O emulador implementa a base CAT necessária ao SPIKE e pode ser ampliado conforme novos loggers e recursos forem testados.
+```text
+[cat]
+[keying]
+[radio_keying]
+[rig]
+[bridge]
+```
 
-Entre os comandos trabalhados pelo protótipo estão:
+especialmente no `force_safe_state`.
+
+## Logs
+
+A configuração de serviço usa limites para evitar crescimento indefinido:
+
+```ini
+log_max_mb = 5
+log_backups = 5
+```
+
+## Compatibilidade TS-2000
+
+`ts2000.py` implementa o subconjunto CAT necessário ao SPIKE e continua sendo expandido conforme tráfego real é observado.
+
+Comandos trabalhados incluem:
 
 - `ID`
 - `FA`
@@ -229,66 +431,31 @@ Entre os comandos trabalhados pelo protótipo estão:
 - `FT`
 - `TX`
 - `RX`
+- `IF`
+- `AI`
+- `AG`
 
-Comandos desconhecidos são registrados para permitir ampliar a compatibilidade com base em tráfego real.
+O parser CAT permanece desacoplado de COM, Windows e Hamlib.
 
-## Rodar testes unitários
+## Resultado atual do SPIKE
 
-A partir de `spikes/cat-ts2000`:
+As hipóteses abaixo estão validadas em bancada:
 
-```powershell
-python -m unittest discover -s tests -v
-```
+1. é possível apresentar uma fachada TS-2000 a softwares distintos enquanto o rádio físico é controlado via Hamlib/rigctld;
+2. múltiplos softwares podem receber CAT simultaneamente quando cada um possui sua própria COM virtual;
+3. PTT e CW podem ser recebidos por clientes diferentes e mapeados por INI;
+4. CW precisa de caminho dedicado low-latency, separado do polling CAT/rigctld;
+5. a configuração pode ser genérica, sem regras específicas para N1MM/MMTTY/LogHX no código;
+6. a arquitetura começa naturalmente a se comportar como um **CAT + Keying Hub**, que é uma boa base para o futuro Vector Client.
 
-## Arquitetura atual do SPIKE
+## Próximos passos
 
-```text
-                    +------------------+
-                    |   N1MM Logger+   |
-                    +---------+--------+
-                              |
-                    TS-2000 CAT + keying
-                              |
-                 +------------v-------------+
-                 |     GADX Vector SPIKE     |
-                 |                           |
-                 | ts2000.py                 |
-                 | rigctld_bridge.py         |
-                 +------+---------------+----+
-                        |               |
-                  Hamlib CAT/PTT     CW RTS
-                        |               |
-                 +------v---------------v----+
-                 |       rádio físico        |
-                 +---------------------------+
-```
-
-`ts2000.py` continua desacoplado de COM, Windows, N1MM e Hamlib. O parser CAT pode portanto evoluir para um Adapter do Vector Client sem carregar dependências do transporte serial.
-
-`rigctld_bridge.py` faz a integração experimental entre essa fachada CAT, Hamlib e o caminho de keying em tempo real.
-
-## Resultado do SPIKE
-
-**Hipótese validada:** é tecnicamente viável apresentar ao N1MM uma interface CAT TS-2000 virtual e traduzir/encaminhar o controle para um rádio físico diferente através do Vector.
-
-Também foi validado que o caminho de CW pode permanecer fora do protocolo CAT, preservando os pulsos KEY DOWN/KEY UP produzidos pelo próprio logger.
-
-Mensagem utilizada no teste final:
-
-```text
-QRL? DE PY5XT
-```
-
-O rádio físico transmitiu corretamente a mensagem comandada pelo N1MM.
-
-## Próximos passos sugeridos
-
-Agora que o caminho N1MM -> Vector -> rádio está comprovado, os próximos incrementos naturais são:
-
-- transformar as capturas reais do N1MM em testes de regressão;
-- testar split/VFO A/VFO B de forma sistemática;
-- testar troca rápida de banda e modo;
-- validar recuperação após desconexão/reconexão do rigctld;
-- medir jitter/latência do caminho CW;
-- validar DXLog usando a mesma fachada TS-2000;
-- evoluir o SPIKE para os adapters/interfaces definitivos do Vector Client.
+- promover `rigctld_bridge_multi.py` para bridge principal depois de mais regressão;
+- atualizar `vector_bridge_service.py` para entender nativamente o INI multi-client;
+- transformar configurações/pairs com0com em setup automatizado;
+- adicionar testes de regressão multi-CAT;
+- testar recuperação após perda de rigctld;
+- medir jitter de CW sistematicamente;
+- testar split/VFO A/VFO B com múltiplos clientes;
+- avaliar adapter nativo MMTTY via Windows messages;
+- evoluir o SPIKE para os adapters definitivos do GADX Vector.
