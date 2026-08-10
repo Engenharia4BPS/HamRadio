@@ -8,7 +8,7 @@ from ts2000 import MODE_NAMES, TS2000Emulator
 
 LOG=logging.getLogger("gadx.vector.hub")
 HAMLIB_TO_TS2000={"LSB":"LSB","USB":"USB","CW":"CW","CWR":"CW-R","FM":"FM","WFM":"FM","AM":"AM","RTTY":"FSK","RTTYR":"FSK-R","PKTLSB":"LSB","PKTUSB":"USB","PKTFM":"FM"}
-SERIAL_LINES={"DTR","RTS","NONE"}; KEYING_POLL_SECONDS=.0005
+SERIAL_LINES={"DTR","RTS","NONE"}; PTT_LINES=SERIAL_LINES|{"RIGCTLD"}; KEYING_POLL_SECONDS=.0005
 
 @dataclass
 class RigSnapshot: frequency_hz:int; mode:str; passband_hz:int
@@ -91,7 +91,8 @@ def load_config(path):
         for k,v in c["keying"].items():
             if k.lower().startswith("client"):clients.append(_client(k,v))
     rk=c["radio_keying"];ptt=rk.get("ptt_line","NONE").strip().upper();cw=rk.get("cw_line","NONE").strip().upper()
-    if ptt not in SERIAL_LINES or cw not in SERIAL_LINES or (ptt!="NONE" and ptt==cw):raise ValueError("invalid [radio_keying] line mapping")
+    if ptt not in PTT_LINES or cw not in SERIAL_LINES:raise ValueError("invalid [radio_keying] line mapping")
+    if ptt in SERIAL_LINES-{"NONE"} and ptt==cw:raise ValueError("PTT and CW cannot share the same physical serial line")
     run=c["runtime"];log=c["logging"]
     return HubConfig(cp,c["cat"].getint("baud",19200),clients,rk.get("port","").strip().upper() or None,rk.getint("baud",19200),ptt,cw,c["rig"].get("host","127.0.0.1"),c["rig"].getint("port",4532),c["rig"].getint("poll_ms",250),run.getboolean("allow_write",True),run.getboolean("allow_ptt",True),run.getboolean("allow_cw",True),log.get("level","INFO").upper())
 def set_line(p,line,on):
@@ -105,7 +106,14 @@ def apply_snapshot(r,s):
     r.state.frequency_a_hz=s.frequency_hz;m=HAMLIB_TO_TS2000.get(s.mode)
     if m:r.state.mode_code=MODE_NAMES[m]
 
-def key_worker(client,out,out_lock,ptt_line,cw_line,allow_ptt,allow_cw,ptts,cws,stop,errors):
+def apply_ptt_output(rig,out,out_lock,ptt_line,on):
+    if ptt_line=="RIGCTLD":
+        rig.set_ptt(on)
+    elif ptt_line in ("DTR","RTS"):
+        if out is None:raise RuntimeError("serial PTT configured but physical keying port is not open")
+        with out_lock:set_line(out,ptt_line,on)
+
+def key_worker(client,rig,out,out_lock,ptt_line,cw_line,allow_ptt,allow_cw,ptts,cws,stop,errors):
     inp=None
     try:
         inp=serial.Serial(client.port,19200,timeout=0,write_timeout=None);lp=read_line(inp,client.ptt_input);lc=read_line(inp,client.cw_input);ptts.set(client.name,lp);cws.set(client.name,lc);LOG.info("Keying %s ready: %s PTT=%s CW=%s",client.name,client.port,client.ptt_input,client.cw_input)
@@ -113,8 +121,7 @@ def key_worker(client,out,out_lock,ptt_line,cw_line,allow_ptt,allow_cw,ptts,cws,
             np=read_line(inp,client.ptt_input);nc=read_line(inp,client.cw_input)
             if np!=lp:
                 lp=np;o,n,_=ptts.set(client.name,np)
-                if allow_ptt and o!=n and out and ptt_line!="NONE":
-                    with out_lock:set_line(out,ptt_line,n)
+                if allow_ptt and o!=n and ptt_line!="NONE":apply_ptt_output(rig,out,out_lock,ptt_line,n)
             if nc!=lc:
                 lc=nc;t0=time.perf_counter_ns();o,n,a=cws.set(client.name,nc)
                 if a>1 and nc:LOG.warning("CW collision: %d clients active",a)
@@ -124,7 +131,10 @@ def key_worker(client,out,out_lock,ptt_line,cw_line,allow_ptt,allow_cw,ptts,cws,
             time.sleep(KEYING_POLL_SECONDS)
     except Exception as e:errors.put(f"keying {client.name}: {e}")
     finally:
-        ptts.set(client.name,False);cws.set(client.name,False)
+        old,new,_=ptts.set(client.name,False);cws.set(client.name,False)
+        if allow_ptt and old!=new and ptt_line!="NONE":
+            try:apply_ptt_output(rig,out,out_lock,ptt_line,new)
+            except Exception:pass
         if inp:
             try:inp.close()
             except Exception:pass
@@ -161,13 +171,14 @@ def main():
     try:rig.connect();initial=rig.get_snapshot()
     except Exception as e:LOG.error("Cannot initialize rigctld: %s",e);return 2
     state=SharedRigState(initial);ptts=LogicalState();cws=LogicalState();stop=threading.Event();errors=queue.SimpleQueue();out_lock=threading.RLock();out=None
-    if c.radio_ptt_line!="NONE" or c.radio_cw_line!="NONE":
-        if not c.radio_keying_port:LOG.error("physical keying enabled without port");return 2
+    needs_serial=(c.radio_ptt_line in ("DTR","RTS")) or (c.radio_cw_line in ("DTR","RTS"))
+    if needs_serial:
+        if not c.radio_keying_port:LOG.error("serial keying enabled without physical port");return 2
         try:out=serial.Serial(c.radio_keying_port,c.radio_keying_baud,timeout=0,write_timeout=None);out.rts=False;out.dtr=False
         except Exception as e:LOG.error("Cannot open physical keying port %s: %s",c.radio_keying_port,e);return 2
     threads=[];t=threading.Thread(target=poll_worker,args=(rig,state,c.rig_poll_ms,stop),daemon=True,name="RigPoll");t.start();threads.append(t)
     for x in c.keying_clients:
-        t=threading.Thread(target=key_worker,args=(x,out,out_lock,c.radio_ptt_line,c.radio_cw_line,c.allow_ptt,c.allow_cw,ptts,cws,stop,errors),daemon=True,name=f"Key-{x.name}");t.start();threads.append(t)
+        t=threading.Thread(target=key_worker,args=(x,rig,out,out_lock,c.radio_ptt_line,c.radio_cw_line,c.allow_ptt,c.allow_cw,ptts,cws,stop,errors),daemon=True,name=f"Key-{x.name}");t.start();threads.append(t)
     for p in c.cat_ports:
         t=threading.Thread(target=cat_worker,args=(p,c.cat_baud,rig,state,c.allow_write,stop,errors),daemon=True,name=f"CAT-{p}");t.start();threads.append(t)
     LOG.info("Vector Hub ready");rc=0
