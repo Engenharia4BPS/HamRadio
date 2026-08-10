@@ -12,20 +12,49 @@ function Assert-Administrator {
     }
 }
 
+function Resolve-VectorPython([string]$Root) {
+    $privatePython = Join-Path $Root "runtime\python.exe"
+
+    if (Test-Path $privatePython) {
+        Write-Host "Python runtime: privado do Vector ($privatePython)"
+        return $privatePython
+    }
+
+    $command = Get-Command python -ErrorAction SilentlyContinue
+    if ($command -and $command.Source -and (Test-Path $command.Source)) {
+        Write-Warning "Runtime privado do Vector nao encontrado."
+        Write-Warning "Usando Python global SOMENTE para validacao da Fase B: $($command.Source)"
+        return $command.Source
+    }
+
+    $legacy310 = "C:\Python\Python310\python.exe"
+    if (Test-Path $legacy310) {
+        Write-Warning "Runtime privado do Vector nao encontrado."
+        Write-Warning "Usando Python 3.10 legado SOMENTE para validacao da Fase B: $legacy310"
+        return $legacy310
+    }
+
+    throw "Nenhum Python utilizavel encontrado."
+}
+
 Assert-Administrator
 
-$Python = Join-Path $InstallRoot "runtime\python.exe"
+$Python = Resolve-VectorPython $InstallRoot
 $ServiceScript = Join-Path $InstallRoot "service\vector_service.py"
 $Hub = Join-Path $InstallRoot "app\vector_hub.py"
 $Config = Join-Path $InstallRoot "config\vector.ini"
 
-foreach ($required in @($Python, $ServiceScript, $Hub, $Config)) {
+foreach ($required in @($ServiceScript, $Hub, $Config)) {
     if (-not (Test-Path $required)) {
         throw "Arquivo necessario nao encontrado: $required"
     }
 }
 
-# O servico legado pode permanecer instalado, mas nao pode disputar as COMs.
+& $Python -c "import serial, win32serviceutil, servicemanager" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    throw "Python encontrado em $Python, mas faltam pyserial/pywin32."
+}
+
 $legacy = Get-Service -Name "GADXVectorBridge" -ErrorAction SilentlyContinue
 if ($legacy -and $legacy.Status -ne "Stopped") {
     Write-Host "Parando servico legado GADXVectorBridge..."
@@ -41,7 +70,7 @@ if ($existing) {
     Start-Sleep -Milliseconds 750
 }
 
-Write-Host "Instalando GADXVectorHub..."
+Write-Host "Instalando GADXVectorHub com: $Python"
 & $Python $ServiceScript install
 if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar GADXVectorHub." }
 
@@ -65,5 +94,6 @@ if ($service.Status -ne "Running") {
 Write-Host ""
 Write-Host "GADX Vector Hub - Phase B service instalado e Running."
 Write-Host "Servico: GADXVectorHub"
+Write-Host "Python:  $Python"
 Write-Host "Config:  $Config"
 Write-Host "Log:     $(Join-Path $InstallRoot 'logs\vector-hub.log')"
