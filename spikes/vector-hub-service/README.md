@@ -4,37 +4,36 @@
 
 **ACTIVE / SPIKE 02**
 
-Este SPIKE sucede `../cat-ts2000/`, que foi congelado apos validar a viabilidade da fachada TS-2000, CAT multi-client e keying low-latency.
+Este SPIKE sucede `../cat-ts2000/`, congelado apos validar a fachada TS-2000, CAT multi-client e keying low-latency.
 
-A pergunta agora e diferente:
+Estado atual:
+
+- **Fase A — Runtime: VALIDADA em bancada**;
+- **Fase B — Windows Service: VALIDADA funcionalmente em bancada**;
+- **Fase C — Provisionamento visual: EM DESENVOLVIMENTO**.
+
+A pergunta atual e:
 
 > Conseguimos transformar a arquitetura CAT + keying ja validada em um componente persistente, configuravel, reparavel e instalavel do GADX Vector no Windows?
 
-## Escopo
+## Estrutura atual
 
-Este SPIKE deve construir a proxima geracao do runtime sem reabrir problemas ja resolvidos no SPIKE anterior.
-
-O foco e:
-
-- promover a multi-bridge validada para um `Vector Hub` com nomenclatura propria;
-- usar um unico arquivo de configuracao do sistema;
-- executar como Windows Service de forma nativa para a configuracao multi-client;
-- manter fail-safe coerente com o novo INI;
-- provisionar/reutilizar multiplos pares com0com;
-- usar runtime Python privado;
-- automatizar install / repair / reinstall;
-- limitar logs;
-- sobreviver a reboot;
-- preservar configuracao existente durante reparo;
-- preparar a base para adicionar/remover clientes posteriormente.
-
-## Fora de escopo por enquanto
-
-Nao vamos reescrever o protocolo TS-2000 nem substituir a estrategia de keying que ja funcionou.
-
-Tambem nao vamos, nesta primeira etapa, resolver adapters nativos de MMTTY, UI completa do Vector Client, arbitragem sofisticada entre writers CAT ou suporte completo a todo o protocolo TS-2000.
-
-Esses assuntos so entram quando interferirem diretamente nos criterios de aceite deste SPIKE.
+```text
+spikes/vector-hub-service/
+├── README.md
+├── app/
+│   ├── vector_hub.py
+│   └── ts2000.py
+├── config/
+│   └── vector.ini
+├── service/
+│   ├── vector_service.py
+│   ├── install-service.ps1
+│   └── uninstall-service.ps1
+└── tools/
+    ├── port_manager.py
+    └── README.md
+```
 
 ## Arquitetura-alvo
 
@@ -50,45 +49,11 @@ Esses assuntos so entram quando interferirem diretamente nos criterios de aceite
                                                                PTT / CW
 ```
 
-Cada software continua tendo sua propria COM virtual. O Hub nao tenta fazer dois processos abrirem a mesma COM.
-
-## Nomenclatura nova
-
-No novo SPIKE, a aplicacao principal passa a se chamar:
-
-```text
-app/vector_hub.py
-```
-
-O arquivo de configuracao passa a ser:
-
-```text
-config/vector.ini
-```
-
-A expressao `bridge` fica reservada aos artefatos historicos do SPIKE 01.
-
-## Estrutura planejada
-
-```text
-spikes/vector-hub-service/
-├── README.md
-├── app/
-│   ├── vector_hub.py
-│   └── ts2000.py
-├── config/
-│   └── vector.ini
-├── service/
-│   └── vector_service.py
-├── installer/
-│   └── ...
-└── tests/
-    └── ...
-```
+Cada software possui sua propria COM virtual. O Hub nao tenta fazer dois processos abrirem a mesma COM.
 
 ## Configuracao
 
-A configuracao do sistema sera organizada por responsabilidade:
+O arquivo principal e `config/vector.ini`, organizado por responsabilidade:
 
 ```ini
 [cat]
@@ -110,6 +75,11 @@ host = 127.0.0.1
 port = 4532
 poll_ms = 250
 
+[runtime]
+allow_write = true
+allow_ptt = true
+allow_cw = true
+
 [service]
 startup = delayed-auto
 recovery = restart
@@ -118,33 +88,24 @@ recovery = restart
 level = INFO
 max_mb = 5
 backups = 5
-```
 
-O runtime deve ler apenas o que lhe pertence. O wrapper de servico deve ser responsavel por `service` e `logging`, evitando misturar configuracao operacional com politica de supervisao.
+[ports]
+application_start = 15
+vector_start = 101
+```
 
 ## Politica de portas COM
 
-A convencao futura e:
+Convencao desejada:
 
 ```text
 lado apresentado aos aplicativos: tentar COM15, COM16, COM17... em ordem crescente
-lado interno do Vector:          tentar COM101, COM102, COM103... em ordem crescente
+lado interno do Vector:           tentar COM101, COM102, COM103... em ordem crescente
 ```
 
-COM15 e apenas o primeiro candidato. O provisionador deve consultar portas ocupadas e nunca sobrescrever uma COM existente.
+COM15 e apenas o primeiro candidato. Portas existentes/ocupadas nunca devem ser sobrescritas silenciosamente.
 
-Exemplo de alocacao:
-
-```text
-COM15 <-> COM101   CAT #1
-COM16 <-> COM102   Keying #1
-COM17 <-> COM103   CAT #2
-COM18 <-> COM104   Keying #2
-COM19 <-> COM105   CAT #3
-COM20 <-> COM106   Keying #3
-```
-
-## Principios herdados do SPIKE 01
+## Principios consolidados
 
 1. Uma COM virtual por cliente.
 2. TS-2000 e fachada; o radio fisico fica atras do Hamlib/rigctld.
@@ -154,86 +115,87 @@ COM20 <-> COM106   Keying #3
 6. Estados multi-client de PTT/CW sao mantidos por fonte e consolidados logicamente.
 7. COMs altas sao internas; COMs baixas sao apresentadas aos softwares sempre que possivel.
 8. Fail-safe tem prioridade: parar, falhar ou reiniciar nao pode deixar PTT/CW acionados.
+9. ComDB sozinho nao define disponibilidade: o provisionador deve cruzar pares com0com, portas ativas e reservas.
+10. O operador deve conseguir ver e aprovar o plano antes da criacao/remocao de COMs.
 
-## Criterios de aceite
+## Fase A — Runtime
 
-O SPIKE 02 sera considerado validado quando todos estes itens forem demonstrados em uma instalacao limpa e depois repetidos em pelo menos outra estacao:
+`app/vector_hub.py` e a evolucao da multi-bridge congelada. Ja foi validado manualmente e depois executado pelo servico, preservando CAT, PTT e CW da bancada.
 
-- [ ] runtime instalado em `C:\Ham\GADX-Vector`;
-- [ ] Python privado instalado e versionado pelo Vector;
-- [ ] com0com instalado ou detectado;
-- [ ] provisionamento automatico com preferencia COM15+ no lado dos aplicativos;
-- [ ] namespace interno COM101+;
-- [ ] N clientes CAT configuraveis;
-- [ ] N clientes keying configuraveis;
-- [ ] Windows Service inicia automaticamente apos reboot;
-- [ ] recovery/restart do servico funciona;
-- [ ] logs possuem limite de tamanho e backups;
-- [ ] stop/restart/crash nao deixa PTT ou CW acionados;
-- [ ] repair/reinstall preserva configuracao quando apropriado;
-- [ ] N1MM continua funcionando;
-- [ ] LogHX continua funcionando;
-- [ ] MMTTY continua funcionando no desenho generico;
-- [ ] CW permanece limpo em velocidade de contest;
-- [ ] PTT funciona com mapeamentos diferentes de RTS/DTR;
-- [ ] dois ou mais clientes CAT funcionam simultaneamente;
-- [ ] documentacao de instalacao e diagnostico reflete o comportamento real.
+## Fase B — Windows Service
 
-## Fases de construcao
+`service/vector_service.py` executa o Hub, usa `vector.ini`, aplica fail-safe, gira logs e funciona com Python privado ou fallback de bancada durante o SPIKE.
 
-### Fase A — Runtime
-
-Copiar a base multi-client validada para este SPIKE, renomear para `vector_hub.py`, ajustar leitura de `vector.ini` e criar testes de regressao basicos sem alterar o caminho low-latency.
-
-### Fase B — Service
-
-Criar `vector_service.py` que:
-
-- inicia `vector_hub.py`;
-- entende `vector.ini`;
-- aplica fail-safe usando `[radio_keying]` e `[rig]`;
-- gira logs segundo `[logging]`;
-- encerra o filho de forma previsivel;
-- funciona com runtime Python privado.
-
-### Fase C — Provisionamento
-
-Criar camada idempotente para:
-
-- detectar com0com;
-- ler ComDB/busynames;
-- encontrar portas livres;
-- criar/reutilizar N pares;
-- preservar mapeamentos existentes durante repair;
-- documentar o dono de cada COM no INI/summary.
-
-### Fase D — Installer
-
-Construir nova geracao do instalador usando as licoes do `cat-ts2000/installer/production`, mas gerando a arquitetura multi-client e a politica COM15+/COM101+.
-
-### Fase E — Regressao de bancada
-
-Repetir os cenarios reais antes de considerar o SPIKE encerrado.
-
-## Baseline de codigo
-
-A referencia funcional inicial e:
+Servico:
 
 ```text
-../cat-ts2000/rigctld_bridge_multi.py
-../cat-ts2000/ts2000.py
+GADXVectorHub
+Automatic (Delayed Start)
+Recovery: restart on failure
 ```
 
-Esses arquivos foram congelados. O desenvolvimento novo deve ocorrer neste diretorio para manter a referencia validada intacta.
+## Fase C — Vector Port Manager
 
-## Decisoes que exigem teste, nao suposicao
+A Fase C passa a ter uma interface visual Tkinter em:
 
-- comportamento quando dois clientes escrevem CAT simultaneamente;
-- reconexao apos queda/reinicio de `rigctld`;
-- politica para adicionar/remover pares depois da instalacao;
-- tratamento de COM fisica ausente no boot;
-- comportamento de service recovery quando portas ainda nao estao enumeradas;
-- split/VFO A/VFO B multi-client;
-- eventual PTT via comandos CAT no mesmo OR das fontes de keying.
+```text
+tools/port_manager.py
+```
 
-Esses itens devem ser promovidos a requisito somente depois de teste de bancada.
+Objetivo da primeira versao:
+
+- inventariar portas ativas;
+- localizar a instalacao correta do com0com;
+- executar `setupc.exe` com o diretorio de trabalho correto;
+- ler `list` e `busynames *`;
+- mostrar os pares existentes;
+- sugerir 4 pares por padrao;
+- permitir aumentar/reduzir a quantidade;
+- permitir definir Cliente, Tipo, COM do aplicativo e COM interna;
+- mostrar um resumo antes de aplicar;
+- criar/remover pares sem forcar conflitos silenciosamente.
+
+A v0.1 **nao reutiliza automaticamente reservas ComDB orfas**. Primeiro queremos validar o fluxo visual e a mecanica segura de `list/create/remove`.
+
+A proxima evolucao da Fase C deve:
+
+- classificar FREE / ACTIVE_PHYSICAL / ACTIVE_COM0COM / RESERVED_COMDB / ORPHAN_RESERVATION / CONFLICT;
+- gerar/atualizar `vector.ini`;
+- persistir owners/mapeamentos em `ports.json` ou estrutura equivalente;
+- permitir PTT/CW por cliente KEYING;
+- opcionalmente parar/reiniciar `GADXVectorHub` ao aplicar mudancas.
+
+## Criterios de aceite do SPIKE 02
+
+- [x] runtime multi-client executado em bancada;
+- [x] Windows Service inicia o Hub e mantem CAT/keying funcionais;
+- [x] logs limitados por configuracao de servico;
+- [x] mapeamento PTT via RIGCTLD + CW serial validado em bancada;
+- [x] dois ou mais clientes CAT funcionam simultaneamente em bancada;
+- [ ] runtime instalado por instalador limpo em `C:\Ham\GADX-Vector`;
+- [ ] Python privado provisionado automaticamente;
+- [ ] com0com instalado/detectado automaticamente;
+- [ ] provisionamento automatico/visual com preferencia COM15+;
+- [ ] namespace interno COM101+ criado automaticamente;
+- [ ] N clientes CAT/keying configurados pelo Port Manager;
+- [ ] reboot completo com servico retomando sozinho validado;
+- [ ] repair/reinstall preservando configuracao;
+- [ ] Port Manager gera configuracao persistente do Hub;
+- [ ] documentacao final de instalacao/diagnostico.
+
+## Fase D — Installer
+
+Somente depois da Fase C provar o provisionamento, construiremos a nova geracao do instalador usando as licoes do instalador antigo.
+
+## Fase E — Regressao
+
+Repetir os cenarios reais em mais de uma estacao antes de encerrar o SPIKE.
+
+## Decisoes que ainda exigem teste
+
+- conflitos de escrita CAT simultanea;
+- reconexao depois de queda/reinicio do `rigctld`;
+- classificacao segura de reservas ComDB orfas;
+- comportamento de service recovery quando COMs ainda nao enumeraram no boot;
+- split/VFO A/B multi-client;
+- eventual PTT por comando CAT no mesmo OR das fontes de keying.
