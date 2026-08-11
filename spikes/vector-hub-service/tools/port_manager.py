@@ -8,7 +8,7 @@ from serial.tools import list_ports
 
 CONFIG_PATH=Path(r"C:\Ham\GADX-Vector\config\vector.ini")
 SETUPC_CANDIDATES=[Path(r"C:\Program Files (x86)\com0com\setupc.exe"),Path(r"C:\Program Files\com0com\setupc.exe"),Path(r"C:\Ham\com0com\setupc.exe"),Path(r"D:\Ham\com0com\setupc.exe")]
-PAIR_RE=re.compile(r"\bCNC([AB])(\d+)\s+.*?(?:PortName|RealPortName)=(COM\d+)",re.I);COM_RE=re.compile(r"^COM(\d+)$",re.I);CLIENT_RE=re.compile(r"^client(\d+)$",re.I)
+PAIR_RE=re.compile(r"\bCNC([AB])(\d+)\s+.*?(?:PortName|RealPortName)=(COM\d+)",re.I);COM_RE=re.compile(r"^COM(\d+)$",re.I);CLIENT_RE=re.compile(r"^client(\d+)$",re.I);KEYING_LINE_RE=re.compile(r"^(\s*)(client(\d+))(\s*=\s*)(.*?)(\r?\n)?$",re.I)
 CREATE_NO_WINDOW=getattr(subprocess,"CREATE_NO_WINDOW",0);STARTF_USESHOWWINDOW=getattr(subprocess,"STARTF_USESHOWWINDOW",0);SW_HIDE=0;APP_COM_MIN,APP_COM_MAX=9,40;VECTOR_COM_MIN,VECTOR_COM_MAX=100,140
 @dataclass
 class ComPair:index:int;app_port:str;vector_port:str
@@ -45,8 +45,7 @@ class Com0Com:
    m=PAIR_RE.search(line)
    if m:s,i,p=m.groups();g.setdefault(int(i),{})[s.upper()]=p.upper()
   return [ComPair(i,x["A"],x["B"]) for i,x in sorted(g.items()) if "A" in x and "B" in x]
- def busy_names(self):
-  return {x.strip().upper() for x in self._query(["busynames","*"],["busynames *"]).splitlines() if COM_RE.match(x.strip().upper())}
+ def busy_names(self):return {x.strip().upper() for x in self._query(["busynames","*"],["busynames *"]).splitlines() if COM_RE.match(x.strip().upper())}
  def create_pair(self,a,v):
   try:
    out=self._run(["install",f"PortName={a}",f"PortName={v}"],15)
@@ -80,8 +79,7 @@ class ClientRow:
   self.w=[ttk.Entry(t,textvariable=self.name,width=14),ttk.Combobox(t,textvariable=self.ct,values=("CAT","NONE"),width=8,state="readonly"),ttk.Combobox(t,textvariable=self.ca,width=9,state="readonly"),ttk.Label(t,text="↔"),ttk.Combobox(t,textvariable=self.cv,width=9,state="readonly"),ttk.Combobox(t,textvariable=self.kt,values=("KEYING","NONE"),width=9,state="readonly"),ttk.Combobox(t,textvariable=self.ka,width=9,state="readonly"),ttk.Label(t,text="↔"),ttk.Combobox(t,textvariable=self.kv,width=9,state="readonly"),ttk.Button(t,text="Remover",command=lambda:m.remove_row(self))]
   self.w[1].bind("<<ComboboxSelected>>",lambda e:self.sync());self.w[5].bind("<<ComboboxSelected>>",lambda e:self.sync());self.w[2].configure(postcommand=lambda:self.choices(self.w[2],"app",self.ca.get()));self.w[4].configure(postcommand=lambda:self.choices(self.w[4],"vector",self.cv.get()));self.w[6].configure(postcommand=lambda:self.choices(self.w[6],"app",self.ka.get()));self.w[8].configure(postcommand=lambda:self.choices(self.w[8],"vector",self.kv.get()));self.refresh();self.sync()
  def place(self,r):
-  cols=[0,1,2,3,4,6,7,8,9,10]
-  for w,c in zip(self.w,cols):w.grid(row=r,column=c,padx=4,pady=3,sticky="ew")
+  for w,c in zip(self.w,[0,1,2,3,4,6,7,8,9,10]):w.grid(row=r,column=c,padx=4,pady=3,sticky="ew")
  def destroy(self):
   for x in self.w:x.destroy()
  def choices(self,w,side,current):w["values"]=self.m.port_choices(side,current,self)
@@ -109,7 +107,7 @@ class App(tk.Tk):
   ttk.Label(self.table,text="Cliente",font=("Segoe UI",9,"bold")).grid(row=0,column=0,rowspan=2,sticky="sw");ttk.Label(self.table,text="CAT",font=("Segoe UI",9,"bold")).grid(row=0,column=1,columnspan=4,sticky="ew");ttk.Label(self.table,text="KEYING",font=("Segoe UI",9,"bold")).grid(row=0,column=6,columnspan=4,sticky="ew")
   for c,x in {1:"Tipo",2:"Aplicativo",4:"Vector",6:"Tipo",7:"Aplicativo",9:"Vector"}.items():ttk.Label(self.table,text=x,anchor="center").grid(row=1,column=c,sticky="ew")
   ttk.Separator(self.table,orient="vertical").grid(row=0,column=5,rowspan=100,sticky="ns",padx=8);self.first=2
-  b=ttk.Frame(p);b.pack(fill="x",pady=10);ttk.Button(b,text="+ Adicionar cliente",command=self.add_client).pack(side="left");ttk.Button(b,text="Sugestao 2 clientes",command=self.suggest).pack(side="left",padx=6);ttk.Button(b,text="Carregar configuracao atual",command=self.load_ini).pack(side="left");ttk.Button(b,text="Recarregar inventario",command=lambda:self.refresh_inventory(True)).pack(side="left",padx=6);ttk.Button(b,text="Aplicar configuracao",command=self.apply).pack(side="right");self.msg=tk.StringVar(value="v0.8: nomes amigaveis no keying e carga do INI.");ttk.Label(self,textvariable=self.msg,padding=(10,4)).pack(fill="x")
+  b=ttk.Frame(p);b.pack(fill="x",pady=10);ttk.Button(b,text="+ Adicionar cliente",command=self.add_client).pack(side="left");ttk.Button(b,text="Sugestao 2 clientes",command=self.suggest).pack(side="left",padx=6);ttk.Button(b,text="Carregar configuracao atual",command=self.load_ini).pack(side="left");ttk.Button(b,text="Recarregar inventario",command=lambda:self.refresh_inventory(True)).pack(side="left",padx=6);ttk.Button(b,text="Aplicar configuracao",command=self.apply).pack(side="right");self.msg=tk.StringVar(value="v0.9: nomes de clientes tambem fazem parte da configuracao gerenciada.");ttk.Label(self,textvariable=self.msg,padding=(10,4)).pack(fill="x")
  def work(self,title,fn,ok,fail=None):
   if self.progress:return
   self.progress=ProgressDialog(self,title)
@@ -137,8 +135,7 @@ class App(tk.Tk):
    try:ok(self.collect())
    except Exception as e:bad(e)
  def render(self):
-  l=["Pares com0com existentes:"]+[f"  #{p.index}: {p.app_port} <-> {p.vector_port}" for p in self.existing_pairs] if self.existing_pairs else ["Pares com0com existentes: nenhum"]
-  l+=["","Portas seriais ativas:"]+[f"  {n}: {self.active[n]}" for n in sorted(self.active,key=lambda x:com_number(x) if COM_RE.match(x) else 9999)];self.inv.delete("1.0","end");self.inv.insert("1.0","\n".join(l))
+  l=["Pares com0com existentes:"]+[f"  #{p.index}: {p.app_port} <-> {p.vector_port}" for p in self.existing_pairs] if self.existing_pairs else ["Pares com0com existentes: nenhum"];l+=["","Portas seriais ativas:"]+[f"  {n}: {self.active[n]}" for n in sorted(self.active,key=lambda x:com_number(x) if COM_RE.match(x) else 9999)];self.inv.delete("1.0","end");self.inv.insert("1.0","\n".join(l))
  def existing(self):
   s=set()
   for p in self.existing_pairs:s|={p.app_port,p.vector_port}
@@ -205,6 +202,45 @@ class App(tk.Tk):
   x=[]
   for r in self.rows:x+=r.pairs()
   return x
+ def keying_names_from_ini(self):
+  result={}
+  if not CONFIG_PATH.exists():return result
+  c=configparser.ConfigParser();c.read(CONFIG_PATH,encoding="utf-8-sig")
+  if not c.has_section("keying"):return result
+  for k,v in c.items("keying"):
+   m=CLIENT_RE.match(k)
+   if not m:continue
+   parts=[x.strip() for x in v.split(",")]
+   idx=int(m.group(1));result[idx]=parts[0] if len(parts)==4 and parts[0] else f"Cliente {idx}"
+  return result
+ def keying_name_changes(self):
+  old=self.keying_names_from_ini();changes=[]
+  for i,row in enumerate(self.rows,1):
+   if row.kt.get()=="NONE":continue
+   new=row.name.get().strip() or f"Cliente {i}";previous=old.get(i,f"Cliente {i}")
+   if new!=previous:changes.append((i,previous,new))
+  return changes
+ def persist_keying_names(self):
+  if not CONFIG_PATH.exists():raise FileNotFoundError(f"Arquivo nao encontrado: {CONFIG_PATH}")
+  desired={}
+  for i,row in enumerate(self.rows,1):
+   if row.kt.get()!="NONE":desired[i]=row.name.get().strip() or f"Cliente {i}"
+  text=CONFIG_PATH.read_text(encoding="utf-8-sig");lines=text.splitlines(keepends=True);inside=False;changed=0;output=[]
+  for line in lines:
+   stripped=line.strip()
+   if stripped.startswith("[") and stripped.endswith("]"):inside=stripped.lower()=="[keying]";output.append(line);continue
+   if inside:
+    m=KEYING_LINE_RE.match(line)
+    if m:
+     idx=int(m.group(3));value=m.group(5);parts=[x.strip() for x in value.split(",")]
+     if idx in desired:
+      name=desired[idx]
+      if len(parts)==4:parts[0]=name
+      elif len(parts)>=3:parts=[name]+parts[:3]
+      newline=m.group(6) or "\n";line=f"{m.group(1)}{m.group(2)}{m.group(4)}{','.join(parts)}{newline}";changed+=1
+   output.append(line)
+  if changed:CONFIG_PATH.write_text("".join(output),encoding="utf-8")
+  return changed
  def validate(self,d):
   if not d:return "Nenhum CAT ou KEYING configurado."
   names=[];e=self.existing()
@@ -221,16 +257,17 @@ class App(tk.Tk):
   if not self.com0com:messagebox.showerror("com0com","Recarregue o inventario.");return
   d=self.pairs();err=self.validate(d)
   if err:messagebox.showerror("Plano invalido",err);return
-  cur={(p.app_port,p.vector_port):p for p in self.existing_pairs};want={(x.app_port,x.vector_port) for x in d};rem=[p for k,p in cur.items() if k not in want];create=[x for x in d if (x.app_port,x.vector_port) not in cur]
-  if not rem and not create:messagebox.showinfo("Sem alteracoes","O com0com ja corresponde ao plano.");return
-  summary=["Alteracoes propostas:"]+[f"Remover #{p.index}: {p.app_port} <-> {p.vector_port}" for p in rem]+[f"Criar: {x.app_port} <-> {x.vector_port} ({x.name}/{x.kind})" for x in create]
+  cur={(p.app_port,p.vector_port):p for p in self.existing_pairs};want={(x.app_port,x.vector_port) for x in d};rem=[p for k,p in cur.items() if k not in want];create=[x for x in d if (x.app_port,x.vector_port) not in cur];name_changes=self.keying_name_changes()
+  if not rem and not create and not name_changes:messagebox.showinfo("Sem alteracoes","COMs e nomes de clientes ja correspondem ao plano.");return
+  summary=["Alteracoes propostas:"]+[f"Remover #{p.index}: {p.app_port} <-> {p.vector_port}" for p in rem]+[f"Criar: {x.app_port} <-> {x.vector_port} ({x.name}/{x.kind})" for x in create]+[f"Renomear client{i}: {old} -> {new}" for i,old,new in name_changes]
   if not messagebox.askyesno("Confirmar","\n".join(summary)):return
   def worker():
-   total=len(rem)+len(create);n=0
+   total=max(1,len(rem)+len(create)+(1 if name_changes else 0));n=0
    for p in rem:self.ps(f"Operacao {n+1} de {total} - Removendo...",f"{p.app_port} <-> {p.vector_port}");self.com0com.remove_pair(p.index);n+=1
    for x in create:self.ps(f"Operacao {n+1} de {total} - Criando...",f"{x.app_port} <-> {x.vector_port}");self.com0com.create_pair(x.app_port,x.vector_port);n+=1
-   return self.collect()
-  def ok(x):self.com0com,self.existing_pairs,self.active,self.busy=x;self.render();self.refresh_rows();self.msg.set("Configuracao aplicada ao com0com. vector.ini ainda nao foi regravado.")
+   if name_changes:self.ps(f"Operacao {n+1} de {total} - Atualizando vector.ini...","Persistindo nomes amigaveis dos clientes");self.persist_keying_names();n+=1
+   self.ps("Finalizando...","Relendo inventario");return self.collect()
+  def ok(x):self.com0com,self.existing_pairs,self.active,self.busy=x;self.render();self.refresh_rows();self.msg.set("Configuracao aplicada. Nomes de clientes sincronizados com vector.ini.")
   self.work("Aplicando configuracao",worker,ok)
 if __name__=="__main__":
  if sys.platform!="win32":raise SystemExit("GADX Vector Port Manager requer Windows")
