@@ -3,7 +3,6 @@ import configparser,ctypes,queue,re,subprocess,sys,threading,tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox,ttk
-from typing import List,Optional,Set
 from serial.tools import list_ports
 
 CONFIG_PATH=Path(r"C:\Ham\GADX-Vector\config\vector.ini")
@@ -66,6 +65,26 @@ def com_number(x):
  m=COM_RE.match(x.strip().upper())
  if not m:raise ValueError(f"Porta invalida: {x}")
  return int(m.group(1))
+class ToolTip:
+ def __init__(self,w,text,delay=550):
+  self.w=w;self.text=text;self.delay=delay;self.after_id=None;self.tip=None;w.bind("<Enter>",self.schedule,add="+");w.bind("<Leave>",self.hide,add="+");w.bind("<ButtonPress>",self.hide,add="+")
+ def schedule(self,e=None):
+  self.hide();self.after_id=self.w.after(self.delay,self.show)
+ def show(self):
+  self.after_id=None
+  if self.tip:return
+  try:x=self.w.winfo_rootx()+18;y=self.w.winfo_rooty()+self.w.winfo_height()+8
+  except tk.TclError:return
+  self.tip=tk.Toplevel(self.w);self.tip.wm_overrideredirect(True);self.tip.wm_geometry(f"+{x}+{y}");tk.Label(self.tip,text=self.text,justify="left",relief="solid",borderwidth=1,background="#ffffe0",foreground="#202020",font=("Segoe UI",9),padx=7,pady=5,wraplength=360).pack()
+ def hide(self,e=None):
+  if self.after_id:
+   try:self.w.after_cancel(self.after_id)
+   except tk.TclError:pass
+   self.after_id=None
+  if self.tip:
+   try:self.tip.destroy()
+   except tk.TclError:pass
+   self.tip=None
 class ProgressDialog(tk.Toplevel):
  def __init__(self,parent,title):
   super().__init__(parent);self.title(title);self.resizable(False,False);self.transient(parent);self.grab_set();self.protocol("WM_DELETE_WINDOW",lambda:None);b=ttk.Frame(self,padding=18);b.pack(fill="both",expand=True);ttk.Label(b,text="GADX Vector Port Manager",font=("Segoe UI",12,"bold")).pack(anchor="w");self.s=tk.StringVar(value="Preparando...");ttk.Label(b,textvariable=self.s).pack(anchor="w",pady=(12,8));self.p=ttk.Progressbar(b,mode="indeterminate",length=420);self.p.pack(fill="x");self.d=tk.StringVar(value="Iniciando operacao...");ttk.Label(b,textvariable=self.d,foreground="#555555").pack(anchor="w",pady=(8,0));self.p.start(12);self.update_idletasks();parent.update_idletasks();self.geometry(f"+{parent.winfo_rootx()+100}+{parent.winfo_rooty()+100}")
@@ -77,6 +96,9 @@ class ClientRow:
  def __init__(self,m,d):
   self.m=m;t=m.table;self.name=tk.StringVar(value=d.name);self.ct=tk.StringVar(value=d.cat_type);self.ca=tk.StringVar(value=d.cat_app);self.cv=tk.StringVar(value=d.cat_vector);self.kt=tk.StringVar(value=d.key_type);self.ka=tk.StringVar(value=d.key_app);self.kv=tk.StringVar(value=d.key_vector)
   self.w=[ttk.Entry(t,textvariable=self.name,width=14),ttk.Combobox(t,textvariable=self.ct,values=("CAT","NONE"),width=8,state="readonly"),ttk.Combobox(t,textvariable=self.ca,width=9,state="readonly"),ttk.Label(t,text="↔"),ttk.Combobox(t,textvariable=self.cv,width=9,state="readonly"),ttk.Combobox(t,textvariable=self.kt,values=("KEYING","NONE"),width=9,state="readonly"),ttk.Combobox(t,textvariable=self.ka,width=9,state="readonly"),ttk.Label(t,text="↔"),ttk.Combobox(t,textvariable=self.kv,width=9,state="readonly"),ttk.Button(t,text="Remover",command=lambda:m.remove_row(self))]
+  tips=["Nome amigavel do software cliente. Ex.: LogHX, N1MM, OmniRig. O nome aparece nos logs e no vector.ini.","Habilita/desabilita CAT para este cliente.","COM selecionada dentro do software para CAT.","","COM interna aberta pelo Vector Hub para CAT.","Habilita/desabilita KEYING (PTT/CW) para este cliente.","COM selecionada dentro do software para PTT/CW.","","COM interna aberta pelo Vector Hub para PTT/CW.","Remove o cliente do plano. Nada e alterado ate clicar em Aplicar configuracao."]
+  for w,text in zip(self.w,tips):
+   if text:m.tip(w,text)
   self.w[1].bind("<<ComboboxSelected>>",lambda e:self.sync());self.w[5].bind("<<ComboboxSelected>>",lambda e:self.sync());self.w[2].configure(postcommand=lambda:self.choices(self.w[2],"app",self.ca.get()));self.w[4].configure(postcommand=lambda:self.choices(self.w[4],"vector",self.cv.get()));self.w[6].configure(postcommand=lambda:self.choices(self.w[6],"app",self.ka.get()));self.w[8].configure(postcommand=lambda:self.choices(self.w[8],"vector",self.kv.get()));self.refresh();self.sync()
  def place(self,r):
   for w,c in zip(self.w,[0,1,2,3,4,6,7,8,9,10]):w.grid(row=r,column=c,padx=4,pady=3,sticky="ew")
@@ -98,16 +120,20 @@ class ClientRow:
   return r
 class App(tk.Tk):
  def __init__(self):
-  super().__init__();self.title("GADX Vector Port Manager - Phase C SPIKE");self.geometry("1120x650");self.minsize(1040,580);self.rows=[];self.com0com=None;self.existing_pairs=[];self.active={};self.busy=set();self.q=queue.Queue();self.progress=None;self.build();self.after(150,lambda:self.refresh_inventory(True,True))
+  super().__init__();self.title("GADX Vector Port Manager - Phase C SPIKE");self.geometry("1120x680");self.minsize(1040,620);self.rows=[];self.com0com=None;self.existing_pairs=[];self.active={};self.busy=set();self.q=queue.Queue();self.progress=None;self.tooltips=[];self.build();self.after(150,lambda:self.refresh_inventory(True,True))
+ def tip(self,w,text):self.tooltips.append(ToolTip(w,text))
  def build(self):
   top=ttk.Frame(self,padding=10);top.pack(fill="x");ttk.Label(top,text="GADX Vector Port Manager",font=("Segoe UI",16,"bold")).pack(side="left");self.admin=tk.StringVar();ttk.Label(top,textvariable=self.admin).pack(side="right")
-  f=ttk.LabelFrame(self,text="Inventario da maquina",padding=8);f.pack(fill="x",padx=10,pady=(0,8));self.status=tk.StringVar(value="com0com: aguardando inventario...");ttk.Label(f,textvariable=self.status).pack(anchor="w");self.inv=tk.Text(f,height=7,wrap="none");self.inv.pack(fill="x",pady=(4,0))
-  p=ttk.LabelFrame(self,text="Clientes e pares virtuais desejados",padding=8);p.pack(fill="both",expand=True,padx=10,pady=8);self.table=ttk.Frame(p);self.table.pack(anchor="w",fill="x")
+  f=ttk.LabelFrame(self,text="Inventario da maquina",padding=8);f.pack(fill="x",padx=10,pady=(0,8));self.status=tk.StringVar(value="com0com: aguardando inventario...");sl=ttk.Label(f,textvariable=self.status);sl.pack(anchor="w");self.inv=tk.Text(f,height=7,wrap="none");self.inv.pack(fill="x",pady=(4,0));self.tip(sl,"Caminho do setupc.exe usado e estado da consulta ao com0com.");self.tip(self.inv,"Inventario tecnico: pares com0com existentes e portas seriais ativas detectadas no Windows.")
+  p=ttk.LabelFrame(self,text="Clientes e pares virtuais desejados",padding=8);p.pack(fill="both",expand=True,padx=10,pady=(0,8));self.table=ttk.Frame(p);self.table.pack(anchor="w",fill="x")
   for c,s in {0:115,1:78,2:82,3:24,4:82,5:18,6:86,7:82,8:24,9:82,10:80}.items():self.table.grid_columnconfigure(c,minsize=s)
-  ttk.Label(self.table,text="Cliente",font=("Segoe UI",9,"bold")).grid(row=0,column=0,rowspan=2,sticky="sw");ttk.Label(self.table,text="CAT",font=("Segoe UI",9,"bold")).grid(row=0,column=1,columnspan=4,sticky="ew");ttk.Label(self.table,text="KEYING",font=("Segoe UI",9,"bold")).grid(row=0,column=6,columnspan=4,sticky="ew")
-  for c,x in {1:"Tipo",2:"Aplicativo",4:"Vector",6:"Tipo",7:"Aplicativo",9:"Vector"}.items():ttk.Label(self.table,text=x,anchor="center").grid(row=1,column=c,sticky="ew")
+  hc=ttk.Label(self.table,text="Cliente",font=("Segoe UI",9,"bold"));hc.grid(row=0,column=0,rowspan=2,sticky="sw");hcat=ttk.Label(self.table,text="CAT",font=("Segoe UI",9,"bold"));hcat.grid(row=0,column=1,columnspan=4,sticky="ew");hkey=ttk.Label(self.table,text="KEYING",font=("Segoe UI",9,"bold"));hkey.grid(row=0,column=6,columnspan=4,sticky="ew");headers={}
+  for c,x in {1:"Tipo",2:"Aplicativo",4:"Vector",6:"Tipo",7:"Aplicativo",9:"Vector"}.items():headers[c]=ttk.Label(self.table,text=x,anchor="center");headers[c].grid(row=1,column=c,sticky="ew")
   ttk.Separator(self.table,orient="vertical").grid(row=0,column=5,rowspan=100,sticky="ns",padx=8);self.first=2
-  b=ttk.Frame(p);b.pack(fill="x",pady=10);ttk.Button(b,text="+ Adicionar cliente",command=self.add_client).pack(side="left");ttk.Button(b,text="Sugestao 2 clientes",command=self.suggest).pack(side="left",padx=6);ttk.Button(b,text="Carregar configuracao atual",command=self.load_ini).pack(side="left");ttk.Button(b,text="Recarregar inventario",command=lambda:self.refresh_inventory(True)).pack(side="left",padx=6);ttk.Button(b,text="Aplicar configuracao",command=self.apply).pack(side="right");self.msg=tk.StringVar(value="v0.9: nomes de clientes tambem fazem parte da configuracao gerenciada.");ttk.Label(self,textvariable=self.msg,padding=(10,4)).pack(fill="x")
+  self.tip(hc,"Identificacao amigavel do programa. Este nome aparece nos logs e no vector.ini.");self.tip(hcat,"CAT: canal de controle do radio apresentado ao software como Kenwood TS-2000.");self.tip(hkey,"KEYING: canal separado para PTT e CW por linhas DTR/RTS.");self.tip(headers[2],"Porta COM apresentada ao software cliente.");self.tip(headers[4],"Porta COM interna aberta pelo Vector Hub.");self.tip(headers[7],"Porta COM apresentada ao software para PTT/CW.");self.tip(headers[9],"Porta COM interna usada pelo Vector Hub para receber PTT/CW.")
+  rowb=ttk.Frame(p);rowb.pack(fill="x",pady=(10,0));add=ttk.Button(rowb,text="+ Adicionar cliente",command=self.add_client);add.pack(side="left");sug=ttk.Button(rowb,text="Sugestao 2 clientes",command=self.suggest);sug.pack(side="left",padx=6);self.tip(add,"Adiciona uma nova linha e sugere o proximo conjunto de COMs livres.");self.tip(sug,"Cria uma sugestao inicial de dois clientes CAT + KEYING usando COMs livres.")
+  self.msg=tk.StringVar(value="v0.10: help embarcado por tooltips e barra de acoes separada.");ttk.Label(self,textvariable=self.msg,padding=(10,3)).pack(side="bottom",fill="x")
+  bottom=ttk.Frame(self,padding=(10,7,10,10));bottom.pack(side="bottom",fill="x");load=ttk.Button(bottom,text="Carregar configuracao atual",command=self.load_ini);load.pack(side="left");reload=ttk.Button(bottom,text="Recarregar inventario",command=lambda:self.refresh_inventory(True));reload.pack(side="left",padx=6);apply=ttk.Button(bottom,text="Aplicar configuracao",command=self.apply);apply.pack(side="right");self.tip(load,"Le C:\\Ham\\GADX-Vector\\config\\vector.ini e cruza as COMs internas com os pares detectados no com0com.");self.tip(reload,"Consulta novamente portas seriais, pares com0com e nomes reservados. Nao altera a configuracao.");self.tip(apply,"Compara o plano da tela com o estado atual, mostra um resumo e so entao cria/remove pares e atualiza nomes no vector.ini.")
  def work(self,title,fn,ok,fail=None):
   if self.progress:return
   self.progress=ProgressDialog(self,title)
@@ -210,8 +236,7 @@ class App(tk.Tk):
   for k,v in c.items("keying"):
    m=CLIENT_RE.match(k)
    if not m:continue
-   parts=[x.strip() for x in v.split(",")]
-   idx=int(m.group(1));result[idx]=parts[0] if len(parts)==4 and parts[0] else f"Cliente {idx}"
+   parts=[x.strip() for x in v.split(",")];idx=int(m.group(1));result[idx]=parts[0] if len(parts)==4 and parts[0] else f"Cliente {idx}"
   return result
  def keying_name_changes(self):
   old=self.keying_names_from_ini();changes=[]
