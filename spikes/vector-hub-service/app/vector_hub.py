@@ -74,11 +74,20 @@ class LogicalState:
             old=any(self.sources.values());self.sources[source]=bool(on);new=any(self.sources.values());return old,new,sum(self.sources.values())
 
 def _ports(v):return [x.strip().upper() for x in v.split(",") if x.strip()]
-def _client(name,v):
-    p=[x.strip().upper() for x in v.split(",")]
-    if len(p)!=3 or p[1] not in SERIAL_LINES or p[2] not in SERIAL_LINES:raise ValueError(f"{name} must be PORT,PTT_INPUT,CW_INPUT")
-    if p[1]!="NONE" and p[1]==p[2]:raise ValueError(f"{name}: PTT and CW cannot share input")
-    return KeyingClientConfig(name,p[0],p[1],p[2])
+def _client(client_id,v):
+    raw=[x.strip() for x in v.split(",")]
+    if len(raw)==3:
+        display_name=client_id
+        port,ptt,cw=raw
+    elif len(raw)==4:
+        display_name=raw[0] or client_id
+        port,ptt,cw=raw[1:]
+    else:
+        raise ValueError(f"{client_id} must be PORT,PTT_INPUT,CW_INPUT or NAME,PORT,PTT_INPUT,CW_INPUT")
+    port=port.upper();ptt=ptt.upper();cw=cw.upper()
+    if ptt not in SERIAL_LINES or cw not in SERIAL_LINES:raise ValueError(f"{client_id}: invalid PTT/CW input")
+    if ptt!="NONE" and ptt==cw:raise ValueError(f"{client_id}: PTT and CW cannot share input")
+    return KeyingClientConfig(display_name,port,ptt,cw)
 def load_config(path):
     c=configparser.ConfigParser();loaded=c.read(path,encoding="utf-8-sig")
     if not loaded:raise ValueError(f"cannot read configuration: {path}")
@@ -107,8 +116,7 @@ def apply_snapshot(r,s):
     if m:r.state.mode_code=MODE_NAMES[m]
 
 def apply_ptt_output(rig,out,out_lock,ptt_line,on):
-    if ptt_line=="RIGCTLD":
-        rig.set_ptt(on)
+    if ptt_line=="RIGCTLD":rig.set_ptt(on)
     elif ptt_line in ("DTR","RTS"):
         if out is None:raise RuntimeError("serial PTT configured but physical keying port is not open")
         with out_lock:set_line(out,ptt_line,on)
