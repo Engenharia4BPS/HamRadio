@@ -130,36 +130,55 @@ function Test-ComPair([int]$Left, [int]$Right) {
     return ($lf -and $rf)
 }
 
+function Install-OrRepair-PythonRuntime {
+    if (-not (Test-Path $PythonInstaller)) {
+        throw "Bundled Python installer not found: $PythonInstaller"
+    }
+
+    New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
+    Write-Host "Installing/repairing private Python 3.10.11 runtime with Tcl/Tk..."
+    $args = @(
+        '/quiet',
+        'InstallAllUsers=1',
+        "TargetDir=$RuntimeDir",
+        'PrependPath=0',
+        'AppendPath=0',
+        'AssociateFiles=0',
+        'Shortcuts=0',
+        'Include_launcher=0',
+        'Include_doc=0',
+        'Include_test=0',
+        'Include_tcltk=1',
+        'Include_pip=1',
+        'Include_exe=1',
+        'Include_lib=1',
+        'Include_dev=1'
+    )
+    $p = Start-Process -FilePath $PythonInstaller -ArgumentList $args -Wait -PassThru
+    if ($p.ExitCode -ne 0) { throw "Private Python installation/repair failed with exit code $($p.ExitCode)." }
+    if (-not (Test-Path $PythonExe)) { throw "Python installer finished but $PythonExe does not exist." }
+}
+
+function Test-TkinterRuntime {
+    if (-not (Test-Path $PythonExe)) { return $false }
+    & $PythonExe -c "import tkinter; print(tkinter.TkVersion)" *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Ensure-PythonRuntime {
     if (-not (Test-Path $PythonExe)) {
-        if (-not (Test-Path $PythonInstaller)) {
-            throw "Private Python runtime is missing and repair payload was not found: $PythonInstaller"
-        }
-        New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
-        Write-Host "Installing private Python 3.10.11 runtime..."
-        $args = @(
-            '/quiet',
-            'InstallAllUsers=1',
-            "TargetDir=$RuntimeDir",
-            'PrependPath=0',
-            'AppendPath=0',
-            'AssociateFiles=0',
-            'Shortcuts=0',
-            'Include_launcher=0',
-            'Include_doc=0',
-            'Include_test=0',
-            'Include_tcltk=0',
-            'Include_pip=1',
-            'Include_exe=1',
-            'Include_lib=1',
-            'Include_dev=1'
-        )
-        $p = Start-Process -FilePath $PythonInstaller -ArgumentList $args -Wait -PassThru
-        if ($p.ExitCode -ne 0) { throw "Private Python installation failed with exit code $($p.ExitCode)." }
-        if (-not (Test-Path $PythonExe)) { throw "Python installer finished but $PythonExe does not exist." }
+        Install-OrRepair-PythonRuntime
+    }
+    elseif (-not (Test-TkinterRuntime)) {
+        Write-Warning "Existing private Python runtime is missing Tcl/Tk (tkinter). Repairing runtime..."
+        Install-OrRepair-PythonRuntime
     }
     else {
-        Write-Host "Private Python runtime already present: $PythonExe"
+        Write-Host "Private Python runtime already present with Tcl/Tk: $PythonExe"
+    }
+
+    if (-not (Test-TkinterRuntime)) {
+        throw "Private Python runtime validation failed: tkinter/Tcl-Tk is unavailable after repair."
     }
 
     & $PythonExe -m pip install --disable-pip-version-check --upgrade "pyserial==3.5" "pywin32==312"
@@ -173,6 +192,12 @@ function Ensure-PythonRuntime {
         elseif (Test-Path $postPy) { & $PythonExe $postPy -install }
         else { throw "pywin32 post-install tool not found in private runtime." }
         if ($LASTEXITCODE -ne 0) { throw "pywin32 post-install failed." }
+    }
+
+    Write-Host "Validating private Python runtime dependencies..."
+    & $PythonExe -c "import tkinter, serial, win32serviceutil, servicemanager; print('Vector Python runtime OK - Tk', tkinter.TkVersion)"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Private Python runtime validation failed. Required modules: tkinter, pyserial and pywin32."
     }
 }
 
