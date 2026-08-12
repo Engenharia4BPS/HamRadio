@@ -7,42 +7,39 @@ $ErrorActionPreference = "Stop"
 $InstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)
 
 function Test-File([string]$RelativePath) {
-    return Test-Path (Join-Path $InstallRoot $RelativePath) -PathType Leaf
+    Test-Path (Join-Path $InstallRoot $RelativePath) -PathType Leaf
 }
 
 function Get-ServiceState([string]$Name) {
     $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
-    if (-not $svc) {
-        return [ordered]@{ exists = $false; status = $null }
-    }
-    return [ordered]@{ exists = $true; status = [string]$svc.Status }
+    if (-not $svc) { return [ordered]@{ exists=$false; status=$null } }
+    [ordered]@{ exists=$true; status=[string]$svc.Status }
 }
 
 function Find-Com0comSetup {
-    $candidates = @(
+    foreach ($candidate in @(
         "C:\Ham\com0com\setupc.exe",
         "$env:ProgramFiles\com0com\setupc.exe",
         "${env:ProgramFiles(x86)}\com0com\setupc.exe"
-    )
-    foreach ($candidate in $candidates) {
+    )) {
         if ($candidate -and (Test-Path $candidate -PathType Leaf)) {
             return (Resolve-Path $candidate).Path
         }
     }
-    return $null
+    $null
 }
 
-function Test-PythonImport([string]$PythonExe, [string]$Module) {
+function Test-PythonImport([string]$PythonExe,[string]$Module) {
     if (-not (Test-Path $PythonExe -PathType Leaf)) { return $false }
     & $PythonExe -c "import $Module" 2>$null | Out-Null
-    return ($LASTEXITCODE -eq 0)
+    $LASTEXITCODE -eq 0
 }
 
 $currentFiles = [ordered]@{
-    vector_hub       = Test-File "app\vector_hub.py"
-    vector_service   = Test-File "service\vector_service.py"
-    vector_ini       = Test-File "config\vector.ini"
-    port_manager     = Test-File "tools\port_manager.py"
+    vector_hub     = Test-File "app\vector_hub.py"
+    vector_service = Test-File "service\vector_service.py"
+    vector_ini     = Test-File "config\vector.ini"
+    port_manager   = Test-File "tools\port_manager.py"
 }
 
 $legacyFiles = [ordered]@{
@@ -57,9 +54,9 @@ $legacyFiles = [ordered]@{
 $runtimePython = Join-Path $InstallRoot "runtime\python.exe"
 $runtime = [ordered]@{
     python_exe = Test-Path $runtimePython -PathType Leaf
-    tkinter    = $false
-    pyserial   = $false
-    pywin32    = $false
+    tkinter = $false
+    pyserial = $false
+    pywin32 = $false
 }
 if ($runtime.python_exe) {
     $runtime.tkinter  = Test-PythonImport $runtimePython "tkinter"
@@ -69,20 +66,30 @@ if ($runtime.python_exe) {
 
 $currentService = Get-ServiceState "GADXVectorHub"
 $legacyService  = Get-ServiceState "GADXVectorBridge"
-$com0comSetup = Find-Com0comSetup
+$com0comSetup   = Find-Com0comSetup
+$rootExists     = Test-Path $InstallRoot -PathType Container
 
-$currentCount = @($currentFiles.Values | Where-Object { $_ }).Count
-$legacyCount  = @($legacyFiles.Values | Where-Object { $_ }).Count
-$rootExists   = Test-Path $InstallRoot -PathType Container
-$hasAnyKnownArtifact = ($currentCount -gt 0 -or $legacyCount -gt 0 -or $runtime.python_exe -or $currentService.exists -or $legacyService.exists)
-
-$requiredCurrent = @(
+# Only these three files prove that the current Hub architecture exists.
+# Port Manager is an auxiliary tool and may legitimately be copied into a
+# legacy installation before migration for diagnostics/testing.
+$currentCoreCount = @(
     $currentFiles.vector_hub,
     $currentFiles.vector_service,
-    $currentFiles.vector_ini,
+    $currentFiles.vector_ini
+    | Where-Object { $_ }
+).Count
+$currentAnyCount = @($currentFiles.Values | Where-Object { $_ }).Count
+$legacyCount = @($legacyFiles.Values | Where-Object { $_ }).Count
+$currentComplete = (
+    $currentFiles.vector_hub -and
+    $currentFiles.vector_service -and
+    $currentFiles.vector_ini -and
     $currentFiles.port_manager
 )
-$currentComplete = (@($requiredCurrent | Where-Object { -not $_ }).Count -eq 0)
+$hasAnyKnownArtifact = (
+    $currentAnyCount -gt 0 -or $legacyCount -gt 0 -or
+    $runtime.python_exe -or $currentService.exists -or $legacyService.exists
+)
 
 $issues = New-Object System.Collections.Generic.List[string]
 $evidence = New-Object System.Collections.Generic.List[string]
@@ -91,7 +98,7 @@ $actions = New-Object System.Collections.Generic.List[string]
 if ($currentFiles.vector_hub)     { $evidence.Add("current: app\vector_hub.py") }
 if ($currentFiles.vector_service) { $evidence.Add("current: service\vector_service.py") }
 if ($currentFiles.vector_ini)     { $evidence.Add("current: config\vector.ini") }
-if ($currentFiles.port_manager)   { $evidence.Add("current: tools\port_manager.py") }
+if ($currentFiles.port_manager)   { $evidence.Add("auxiliary: tools\port_manager.py") }
 foreach ($entry in $legacyFiles.GetEnumerator()) {
     if ($entry.Value) { $evidence.Add("legacy: $($entry.Key)") }
 }
@@ -109,35 +116,35 @@ if (-not $rootExists -or -not $hasAnyKnownArtifact) {
     $actions.Add("Perform a clean installation.")
 }
 elseif ($currentComplete -and $legacyCount -eq 0) {
-    # A complete current installation wins over a stale legacy service entry.
-    # This is a repair/cleanup scenario, not a migration scenario.
     $classification = "CURRENT"
-
     if ($legacyService.exists) {
         $repairRequired = $true
         $issues.Add("Stale legacy service GADXVectorBridge is still installed ($($legacyService.status)).")
         $actions.Add("Remove the stale GADXVectorBridge service after confirming GADXVectorHub is healthy.")
     }
 }
-elseif ($currentCount -gt 0 -and $legacyCount -gt 0) {
+elseif ($currentCoreCount -gt 0 -and $legacyCount -gt 0) {
     $classification = "BROKEN"
     $migrationRequired = $true
     $repairRequired = $true
-    $issues.Add("Current and legacy installation files coexist in the installation root.")
+    $issues.Add("Current Hub core files and legacy installation files coexist.")
     $actions.Add("Back up legacy configuration before changing files.")
-    $actions.Add("Migrate legacy INI values into config\vector.ini only where the current configuration does not already supersede them.")
+    $actions.Add("Prefer current vector.ini values and migrate only missing legacy settings.")
     $actions.Add("Preserve existing com0com pairs whenever possible.")
     $actions.Add("Remove GADXVectorBridge only after GADXVectorHub is ready.")
 }
-elseif ($legacyCount -gt 0) {
+elseif ($legacyCount -gt 0 -and $currentCoreCount -eq 0) {
     $classification = "LEGACY"
     $migrationRequired = $true
     $actions.Add("Back up bridge.ini / bridge_multi.ini / logger.ini into config\legacy.")
     $actions.Add("Preserve existing com0com pairs whenever possible.")
     $actions.Add("Generate config\vector.ini from legacy configuration.")
     $actions.Add("Replace GADXVectorBridge with GADXVectorHub.")
+    if ($currentFiles.port_manager) {
+        $actions.Add("Keep the already-copied Port Manager; it is auxiliary and does not make this a current installation.")
+    }
 }
-elseif ($currentCount -gt 0) {
+elseif ($currentCoreCount -gt 0 -or $currentFiles.port_manager -or $currentService.exists) {
     $classification = "BROKEN"
     $repairRequired = $true
     if (-not $currentFiles.vector_hub)     { $issues.Add("Missing app\vector_hub.py") }
@@ -145,18 +152,16 @@ elseif ($currentCount -gt 0) {
     if (-not $currentFiles.vector_ini)     { $issues.Add("Missing config\vector.ini") }
     if (-not $currentFiles.port_manager)   { $issues.Add("Missing tools\port_manager.py") }
     $actions.Add("Repair current installation files before starting the service.")
-
-    if ($legacyService.exists) {
+    if ($legacyService.exists -and $legacyCount -eq 0) {
         $issues.Add("Legacy service GADXVectorBridge is installed, but no legacy configuration files were found.")
-        $actions.Add("Treat GADXVectorBridge as stale service metadata; do not attempt INI migration without legacy files.")
+        $actions.Add("Treat GADXVectorBridge as stale metadata; do not migrate INI without legacy files.")
     }
 }
 elseif ($legacyService.exists) {
-    # Service metadata alone is insufficient evidence to call the machine LEGACY.
     $classification = "BROKEN"
     $repairRequired = $true
-    $issues.Add("Only the legacy GADXVectorBridge service was found; legacy installation files are missing.")
-    $actions.Add("Remove stale legacy service metadata and perform a repair/clean install as appropriate.")
+    $issues.Add("Only the legacy GADXVectorBridge service was found; legacy files are missing.")
+    $actions.Add("Remove stale legacy service metadata and perform repair/clean install as appropriate.")
 }
 else {
     $classification = "BROKEN"
@@ -169,8 +174,7 @@ if ($classification -ne "CLEAN") {
         $issues.Add("Private runtime\python.exe is missing.")
         $repairRequired = $true
         $actions.Add("Install the private Python runtime.")
-    }
-    else {
+    } else {
         if (-not $runtime.tkinter) {
             $issues.Add("Private Python runtime is missing Tcl/Tk (tkinter).")
             $repairRequired = $true
@@ -187,13 +191,11 @@ if ($classification -ne "CLEAN") {
             $actions.Add("Install/repair pywin32==312 in the private runtime.")
         }
     }
-
     if (-not $com0comSetup) {
         $issues.Add("com0com setupc.exe was not found.")
         $repairRequired = $true
         $actions.Add("Install or repair com0com before provisioning virtual ports.")
     }
-
     if ($classification -eq "CURRENT" -and -not $currentService.exists) {
         $issues.Add("Current files exist but GADXVectorHub service is not installed.")
         $repairRequired = $true
@@ -203,31 +205,26 @@ if ($classification -ne "CLEAN") {
 
 $recommendedMode = switch ($classification) {
     "CLEAN"   { "INSTALL" }
-    "LEGACY"  { "MIGRATE" }
+    "LEGACY"  { if ($repairRequired) { "MIGRATE_REPAIR" } else { "MIGRATE" } }
     "BROKEN"  { if ($migrationRequired) { "MIGRATE_REPAIR" } else { "REPAIR" } }
     "CURRENT" { if ($repairRequired) { "REPAIR" } else { "NONE" } }
     default    { "REPAIR" }
 }
 
 $result = [ordered]@{
-    schema_version = 2
+    schema_version = 3
     install_root = $InstallRoot
     classification = $classification
     recommended_mode = $recommendedMode
     migration_required = $migrationRequired
     repair_required = $repairRequired
     current_complete = $currentComplete
+    current_core_count = $currentCoreCount
     current_files = $currentFiles
     legacy_files = $legacyFiles
     runtime = $runtime
-    services = [ordered]@{
-        current = $currentService
-        legacy = $legacyService
-    }
-    com0com = [ordered]@{
-        found = [bool]$com0comSetup
-        setupc = $com0comSetup
-    }
+    services = [ordered]@{ current=$currentService; legacy=$legacyService }
+    com0com = [ordered]@{ found=[bool]$com0comSetup; setupc=$com0comSetup }
     evidence = @($evidence)
     issues = @($issues)
     recommended_actions = @($actions | Select-Object -Unique)
@@ -244,23 +241,19 @@ Write-Host "Install root : $InstallRoot"
 Write-Host "State        : $classification" -ForegroundColor Yellow
 Write-Host "Mode         : $recommendedMode"
 Write-Host ""
-
-if ($evidence.Count -gt 0) {
+if ($evidence.Count) {
     Write-Host "Evidence:"
     foreach ($item in $evidence) { Write-Host "  + $item" }
     Write-Host ""
 }
-
-if ($issues.Count -gt 0) {
+if ($issues.Count) {
     Write-Host "Issues:" -ForegroundColor Yellow
     foreach ($item in $issues) { Write-Host "  ! $item" }
     Write-Host ""
 }
-
-if ($actions.Count -gt 0) {
+if ($actions.Count) {
     Write-Host "Recommended actions:"
     foreach ($item in ($actions | Select-Object -Unique)) { Write-Host "  -> $item" }
     Write-Host ""
 }
-
 $result
