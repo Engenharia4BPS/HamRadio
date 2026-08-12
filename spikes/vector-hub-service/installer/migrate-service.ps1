@@ -5,6 +5,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $InstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)
+$InstallerRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$PayloadRoot = Join-Path $InstallerRoot "payload"
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -33,7 +35,31 @@ function Remove-CurrentService([string]$Python,[string]$ServiceScript) {
     Start-Sleep -Milliseconds 700
 }
 
+function Assert-Payload {
+    $requiredPayload = @(
+        (Join-Path $PayloadRoot "app\vector_hub.py")
+        (Join-Path $PayloadRoot "app\ts2000.py")
+        (Join-Path $PayloadRoot "service\vector_service.py")
+    )
+    foreach ($required in $requiredPayload) {
+        if (-not (Test-Path $required -PathType Leaf)) {
+            throw "Installer payload is incomplete. Missing: $required"
+        }
+    }
+}
+
+function Deploy-Payload {
+    $appDir = Join-Path $InstallRoot "app"
+    $serviceDir = Join-Path $InstallRoot "service"
+    New-Item -ItemType Directory -Force -Path $appDir,$serviceDir | Out-Null
+
+    Copy-Item -LiteralPath (Join-Path $PayloadRoot "app\vector_hub.py") -Destination (Join-Path $appDir "vector_hub.py") -Force
+    Copy-Item -LiteralPath (Join-Path $PayloadRoot "app\ts2000.py") -Destination (Join-Path $appDir "ts2000.py") -Force
+    Copy-Item -LiteralPath (Join-Path $PayloadRoot "service\vector_service.py") -Destination (Join-Path $serviceDir "vector_service.py") -Force
+}
+
 Assert-Administrator
+Assert-Payload
 
 $Python = Join-Path $InstallRoot "runtime\python.exe"
 $Hub = Join-Path $InstallRoot "app\vector_hub.py"
@@ -41,10 +67,11 @@ $Ts2000 = Join-Path $InstallRoot "app\ts2000.py"
 $ServiceScript = Join-Path $InstallRoot "service\vector_service.py"
 $Config = Join-Path $InstallRoot "config\vector.ini"
 
-foreach ($required in @($Python,$Hub,$Ts2000,$ServiceScript,$Config)) {
-    if (-not (Test-Path $required -PathType Leaf)) {
-        throw "Required current-generation file is missing: $required"
-    }
+if (-not (Test-Path $Python -PathType Leaf)) {
+    throw "Private runtime is missing: $Python"
+}
+if (-not (Test-Path $Config -PathType Leaf)) {
+    throw "Migrated/current vector.ini is missing: $Config"
 }
 
 & $Python -c "import serial, win32serviceutil, servicemanager, tkinter" 2>$null
@@ -58,6 +85,7 @@ $current = Get-Service -Name "GADXVectorHub" -ErrorAction SilentlyContinue
 Write-Host ""
 Write-Host "GADX Vector - Service migration" -ForegroundColor Cyan
 Write-Host "Install root : $InstallRoot"
+Write-Host "Payload      : $PayloadRoot"
 Write-Host "Python       : $Python"
 Write-Host "Config       : $Config"
 Write-Host "Legacy svc   : $(if ($legacy) { [string]$legacy.Status } else { 'not installed' })"
@@ -65,30 +93,40 @@ Write-Host "Current svc  : $(if ($current) { [string]$current.Status } else { 'n
 Write-Host ""
 
 if (-not $Apply) {
-    Write-Host "PREVIEW ONLY - no service changes were made." -ForegroundColor Yellow
+    Write-Host "PREVIEW ONLY - no files or services were changed." -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Planned transaction:"
-    Write-Host "  1. Validate private runtime and current-generation files."
-    Write-Host "  2. Stop GADXVectorBridge temporarily if it is running."
-    Write-Host "  3. Install/reinstall GADXVectorHub."
-    Write-Host "  4. Configure delayed-auto and failure recovery."
-    Write-Host "  5. Start GADXVectorHub and validate it remains Running."
-    Write-Host "  6. If validation fails: remove GADXVectorHub and restart GADXVectorBridge."
-    Write-Host "  7. If validation succeeds: delete GADXVectorBridge."
+    Write-Host "  1. Validate private runtime, vector.ini and installer payload."
+    Write-Host "  2. Deploy current vector_hub.py, ts2000.py and vector_service.py from installer\payload."
+    Write-Host "  3. Stop GADXVectorBridge temporarily if it is running."
+    Write-Host "  4. Install/reinstall GADXVectorHub."
+    Write-Host "  5. Configure delayed-auto and failure recovery."
+    Write-Host "  6. Start GADXVectorHub and validate it remains Running."
+    Write-Host "  7. If validation fails: remove GADXVectorHub and restart GADXVectorBridge."
+    Write-Host "  8. If validation succeeds: delete GADXVectorBridge."
+    Write-Host ""
+    Write-Host "The existing vector.ini and com0com pairs will be preserved."
     exit 0
 }
 
 $legacyWasRunning = ($legacy -and [string]$legacy.Status -eq "Running")
-$legacyStopped = $false
 
 try {
+    Write-Host "Deploying current-generation payload..."
+    Deploy-Payload
+
+    foreach ($required in @($Hub,$Ts2000,$ServiceScript,$Config)) {
+        if (-not (Test-Path $required -PathType Leaf)) {
+            throw "Required current-generation file is missing after payload deployment: $required"
+        }
+    }
+
     if ($legacyWasRunning) {
         Write-Host "Stopping legacy GADXVectorBridge..."
         Stop-Service -Name "GADXVectorBridge" -Force
         if (-not (Wait-ServiceState "GADXVectorBridge" "Stopped" 10)) {
             throw "GADXVectorBridge did not stop within 10 seconds."
         }
-        $legacyStopped = $true
     }
 
     if ($current) {
@@ -113,8 +151,6 @@ try {
         throw "GADXVectorHub did not reach Running state."
     }
 
-    # The service itself validates that vector_hub.py does not exit immediately.
-    # Give it additional time so a startup failure is observed before legacy removal.
     Write-Host "Validating GADXVectorHub stability..."
     Start-Sleep -Seconds 4
     $check = Get-Service -Name "GADXVectorHub" -ErrorAction SilentlyContinue
@@ -131,9 +167,10 @@ try {
 
     Write-Host ""
     Write-Host "Service migration completed successfully." -ForegroundColor Green
-    Write-Host "GADXVectorHub : Running"
+    Write-Host "GADXVectorHub    : Running"
     Write-Host "GADXVectorBridge : removed (if previously installed)"
-    Write-Host "Existing com0com pairs were not changed."
+    Write-Host "vector.ini       : preserved"
+    Write-Host "com0com pairs    : unchanged"
     Write-Host ""
 }
 catch {
