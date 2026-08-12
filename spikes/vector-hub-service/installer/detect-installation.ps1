@@ -72,12 +72,12 @@ $rootExists     = Test-Path $InstallRoot -PathType Container
 # Only these three files prove that the current Hub architecture exists.
 # Port Manager is an auxiliary tool and may legitimately be copied into a
 # legacy installation before migration for diagnostics/testing.
-$currentCoreCount = @(
-    $currentFiles.vector_hub,
-    $currentFiles.vector_service,
+$currentCoreItems = @(
+    $currentFiles.vector_hub
+    $currentFiles.vector_service
     $currentFiles.vector_ini
-    | Where-Object { $_ }
-).Count
+)
+$currentCoreCount = @($currentCoreItems | Where-Object { $_ }).Count
 $currentAnyCount = @($currentFiles.Values | Where-Object { $_ }).Count
 $legacyCount = @($legacyFiles.Values | Where-Object { $_ }).Count
 $currentComplete = (
