@@ -10,10 +10,6 @@ function Test-File([string]$RelativePath) {
     return Test-Path (Join-Path $InstallRoot $RelativePath) -PathType Leaf
 }
 
-function Test-Dir([string]$RelativePath) {
-    return Test-Path (Join-Path $InstallRoot $RelativePath) -PathType Container
-}
-
 function Get-ServiceState([string]$Name) {
     $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
     if (-not $svc) {
@@ -50,12 +46,12 @@ $currentFiles = [ordered]@{
 }
 
 $legacyFiles = [ordered]@{
-    rigctld_bridge       = Test-File "app\rigctld_bridge.py"
-    rigctld_bridge_multi = Test-File "app\rigctld_bridge_multi.py"
-    vector_bridge_service= Test-File "service\vector_bridge_service.py"
-    bridge_ini           = Test-File "config\bridge.ini"
-    bridge_multi_ini     = Test-File "config\bridge_multi.ini"
-    logger_ini           = Test-File "config\logger.ini"
+    rigctld_bridge        = Test-File "app\rigctld_bridge.py"
+    rigctld_bridge_multi  = Test-File "app\rigctld_bridge_multi.py"
+    vector_bridge_service = Test-File "service\vector_bridge_service.py"
+    bridge_ini            = Test-File "config\bridge.ini"
+    bridge_multi_ini      = Test-File "config\bridge_multi.ini"
+    logger_ini            = Test-File "config\logger.ini"
 }
 
 $runtimePython = Join-Path $InstallRoot "runtime\python.exe"
@@ -79,6 +75,14 @@ $currentCount = @($currentFiles.Values | Where-Object { $_ }).Count
 $legacyCount  = @($legacyFiles.Values | Where-Object { $_ }).Count
 $rootExists   = Test-Path $InstallRoot -PathType Container
 $hasAnyKnownArtifact = ($currentCount -gt 0 -or $legacyCount -gt 0 -or $runtime.python_exe -or $currentService.exists -or $legacyService.exists)
+
+$requiredCurrent = @(
+    $currentFiles.vector_hub,
+    $currentFiles.vector_service,
+    $currentFiles.vector_ini,
+    $currentFiles.port_manager
+)
+$currentComplete = (@($requiredCurrent | Where-Object { -not $_ }).Count -eq 0)
 
 $issues = New-Object System.Collections.Generic.List[string]
 $evidence = New-Object System.Collections.Generic.List[string]
@@ -104,16 +108,28 @@ if (-not $rootExists -or -not $hasAnyKnownArtifact) {
     $classification = "CLEAN"
     $actions.Add("Perform a clean installation.")
 }
+elseif ($currentComplete -and $legacyCount -eq 0) {
+    # A complete current installation wins over a stale legacy service entry.
+    # This is a repair/cleanup scenario, not a migration scenario.
+    $classification = "CURRENT"
+
+    if ($legacyService.exists) {
+        $repairRequired = $true
+        $issues.Add("Stale legacy service GADXVectorBridge is still installed ($($legacyService.status)).")
+        $actions.Add("Remove the stale GADXVectorBridge service after confirming GADXVectorHub is healthy.")
+    }
+}
 elseif ($currentCount -gt 0 -and $legacyCount -gt 0) {
     $classification = "BROKEN"
     $migrationRequired = $true
     $repairRequired = $true
-    $issues.Add("Current and legacy artifacts coexist in the installation root.")
+    $issues.Add("Current and legacy installation files coexist in the installation root.")
     $actions.Add("Back up legacy configuration before changing files.")
-    $actions.Add("Migrate legacy INI values into config\vector.ini.")
+    $actions.Add("Migrate legacy INI values into config\vector.ini only where the current configuration does not already supersede them.")
+    $actions.Add("Preserve existing com0com pairs whenever possible.")
     $actions.Add("Remove GADXVectorBridge only after GADXVectorHub is ready.")
 }
-elseif ($legacyCount -gt 0 -or $legacyService.exists) {
+elseif ($legacyCount -gt 0) {
     $classification = "LEGACY"
     $migrationRequired = $true
     $actions.Add("Back up bridge.ini / bridge_multi.ini / logger.ini into config\legacy.")
@@ -121,27 +137,31 @@ elseif ($legacyCount -gt 0 -or $legacyService.exists) {
     $actions.Add("Generate config\vector.ini from legacy configuration.")
     $actions.Add("Replace GADXVectorBridge with GADXVectorHub.")
 }
-else {
-    $requiredCurrent = @(
-        $currentFiles.vector_hub,
-        $currentFiles.vector_service,
-        $currentFiles.vector_ini,
-        $currentFiles.port_manager
-    )
-    $currentComplete = (@($requiredCurrent | Where-Object { -not $_ }).Count -eq 0)
+elseif ($currentCount -gt 0) {
+    $classification = "BROKEN"
+    $repairRequired = $true
+    if (-not $currentFiles.vector_hub)     { $issues.Add("Missing app\vector_hub.py") }
+    if (-not $currentFiles.vector_service) { $issues.Add("Missing service\vector_service.py") }
+    if (-not $currentFiles.vector_ini)     { $issues.Add("Missing config\vector.ini") }
+    if (-not $currentFiles.port_manager)   { $issues.Add("Missing tools\port_manager.py") }
+    $actions.Add("Repair current installation files before starting the service.")
 
-    if (-not $currentComplete) {
-        $classification = "BROKEN"
-        $repairRequired = $true
-        if (-not $currentFiles.vector_hub)     { $issues.Add("Missing app\vector_hub.py") }
-        if (-not $currentFiles.vector_service) { $issues.Add("Missing service\vector_service.py") }
-        if (-not $currentFiles.vector_ini)     { $issues.Add("Missing config\vector.ini") }
-        if (-not $currentFiles.port_manager)   { $issues.Add("Missing tools\port_manager.py") }
-        $actions.Add("Repair current installation files before starting the service.")
+    if ($legacyService.exists) {
+        $issues.Add("Legacy service GADXVectorBridge is installed, but no legacy configuration files were found.")
+        $actions.Add("Treat GADXVectorBridge as stale service metadata; do not attempt INI migration without legacy files.")
     }
-    else {
-        $classification = "CURRENT"
-    }
+}
+elseif ($legacyService.exists) {
+    # Service metadata alone is insufficient evidence to call the machine LEGACY.
+    $classification = "BROKEN"
+    $repairRequired = $true
+    $issues.Add("Only the legacy GADXVectorBridge service was found; legacy installation files are missing.")
+    $actions.Add("Remove stale legacy service metadata and perform a repair/clean install as appropriate.")
+}
+else {
+    $classification = "BROKEN"
+    $repairRequired = $true
+    $actions.Add("Repair incomplete GADX Vector installation.")
 }
 
 if ($classification -ne "CLEAN") {
@@ -182,20 +202,21 @@ if ($classification -ne "CLEAN") {
 }
 
 $recommendedMode = switch ($classification) {
-    "CLEAN"  { "INSTALL" }
-    "LEGACY" { "MIGRATE" }
-    "BROKEN" { if ($migrationRequired) { "MIGRATE_REPAIR" } else { "REPAIR" } }
-    "CURRENT"{ if ($repairRequired) { "REPAIR" } else { "NONE" } }
-    default  { "REPAIR" }
+    "CLEAN"   { "INSTALL" }
+    "LEGACY"  { "MIGRATE" }
+    "BROKEN"  { if ($migrationRequired) { "MIGRATE_REPAIR" } else { "REPAIR" } }
+    "CURRENT" { if ($repairRequired) { "REPAIR" } else { "NONE" } }
+    default    { "REPAIR" }
 }
 
 $result = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     install_root = $InstallRoot
     classification = $classification
     recommended_mode = $recommendedMode
     migration_required = $migrationRequired
     repair_required = $repairRequired
+    current_complete = $currentComplete
     current_files = $currentFiles
     legacy_files = $legacyFiles
     runtime = $runtime
