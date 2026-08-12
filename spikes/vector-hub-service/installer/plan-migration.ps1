@@ -29,7 +29,8 @@ function Read-Ini([string]$Path) {
 }
 
 function Get-IniValue($Ini,[string]$Section,[string]$Key,$Default=$null) {
-    $s = $Section.ToLowerInvariant(); $k = $Key.ToLowerInvariant()
+    $s = $Section.ToLowerInvariant()
+    $k = $Key.ToLowerInvariant()
     if ($Ini.Contains($s) -and $Ini[$s].Contains($k)) { return $Ini[$s][$k] }
     return $Default
 }
@@ -39,17 +40,26 @@ function Split-List([string]$Value) {
     return @($Value.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
+# Build each path separately for Windows PowerShell 5 compatibility.
+$bridgeMultiPath = Join-Path -Path $InstallRoot -ChildPath "config\bridge_multi.ini"
+$bridgePath = Join-Path -Path $InstallRoot -ChildPath "config\bridge.ini"
+$loggerPath = Join-Path -Path $InstallRoot -ChildPath "config\logger.ini"
+
 $legacyCandidates = @(
-    Join-Path $InstallRoot "config\bridge_multi.ini",
-    Join-Path $InstallRoot "config\bridge.ini",
-    Join-Path $InstallRoot "config\logger.ini"
+    $bridgeMultiPath
+    $bridgePath
+    $loggerPath
 )
 $legacyExisting = @($legacyCandidates | Where-Object { Test-Path $_ -PathType Leaf })
-if ($legacyExisting.Count -eq 0) { throw "No legacy INI files were found under $InstallRoot\config." }
+if ($legacyExisting.Count -eq 0) {
+    throw "No legacy INI files were found under $InstallRoot\config."
+}
 
 # Prefer bridge_multi.ini because it represents the latest legacy multi-client model.
 $sourcePath = $legacyExisting | Where-Object { $_ -like '*bridge_multi.ini' } | Select-Object -First 1
-if (-not $sourcePath) { $sourcePath = $legacyExisting | Where-Object { $_ -like '*bridge.ini' } | Select-Object -First 1 }
+if (-not $sourcePath) {
+    $sourcePath = $legacyExisting | Where-Object { $_ -like '*bridge.ini' } | Select-Object -First 1
+}
 if (-not $sourcePath) { $sourcePath = $legacyExisting[0] }
 $ini = Read-Ini $sourcePath
 
@@ -67,14 +77,26 @@ if ($ini.Contains("keying")) {
     foreach ($entry in $ini["keying"].GetEnumerator()) {
         $parts = Split-List $entry.Value
         if ($parts.Count -ge 3) {
-            $keying += [ordered]@{ id=$entry.Key; name=$entry.Key; port=$parts[0]; ptt=$parts[1]; cw=$parts[2] }
+            $keying += [ordered]@{
+                id = $entry.Key
+                name = $entry.Key
+                port = $parts[0]
+                ptt = $parts[1]
+                cw = $parts[2]
+            }
         }
     }
 }
 if (-not $keying.Count) {
     $kp = Get-IniValue $ini "bridge" "keying_port" $null
     if ($kp) {
-        $keying += [ordered]@{ id="client1"; name="client1"; port=$kp; ptt="DTR"; cw="RTS" }
+        $keying += [ordered]@{
+            id = "client1"
+            name = "client1"
+            port = $kp
+            ptt = "DTR"
+            cw = "RTS"
+        }
     }
 }
 
@@ -90,8 +112,9 @@ $allowPtt = Get-IniValue $ini "bridge" "allow_ptt" "true"
 $allowCw = Get-IniValue $ini "bridge" "allow_cw" "true"
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$backupDir = Join-Path $InstallRoot ("config\legacy\" + $stamp)
-$targetIni = Join-Path $InstallRoot "config\vector.ini"
+$backupRelative = "config\legacy\" + $stamp
+$backupDir = Join-Path -Path $InstallRoot -ChildPath $backupRelative
+$targetIni = Join-Path -Path $InstallRoot -ChildPath "config\vector.ini"
 
 $warnings = New-Object System.Collections.Generic.List[string]
 if (-not $catPorts.Count) { $warnings.Add("No CAT ports could be inferred from the legacy INI.") }
@@ -99,7 +122,7 @@ if (-not $keying.Count) { $warnings.Add("No keying clients could be inferred fro
 if (-not $radioPort) { $warnings.Add("No physical radio keying port could be inferred; Port Manager/manual review will be required.") }
 
 $result = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     mode = "PREVIEW_ONLY"
     install_root = $InstallRoot
     source_ini = $sourcePath
@@ -116,7 +139,10 @@ $result = [ordered]@{
     warnings = @($warnings)
 }
 
-if ($AsJson) { $result | ConvertTo-Json -Depth 8; exit 0 }
+if ($AsJson) {
+    $result | ConvertTo-Json -Depth 8
+    exit 0
+}
 
 Write-Host ""
 Write-Host "GADX Vector - Legacy migration planner" -ForegroundColor Cyan
@@ -127,12 +153,21 @@ Write-Host "Backup to    : $backupDir"
 Write-Host "Target INI   : $targetIni"
 Write-Host ""
 Write-Host "CAT:"
-if ($catPorts.Count) { Write-Host ("  ports : " + ($catPorts -join ', ')); Write-Host "  baud  : $catBaud" } else { Write-Host "  (not detected)" }
+if ($catPorts.Count) {
+    Write-Host ("  ports : " + ($catPorts -join ', '))
+    Write-Host "  baud  : $catBaud"
+} else {
+    Write-Host "  (not detected)"
+}
 Write-Host ""
 Write-Host "KEYING:"
 if ($keying.Count) {
-    foreach ($k in $keying) { Write-Host ("  {0}: {1} PTT={2} CW={3}" -f $k.id,$k.port,$k.ptt,$k.cw) }
-} else { Write-Host "  (not detected)" }
+    foreach ($k in $keying) {
+        Write-Host ("  {0}: {1} PTT={2} CW={3}" -f $k.id,$k.port,$k.ptt,$k.cw)
+    }
+} else {
+    Write-Host "  (not detected)"
+}
 Write-Host ""
 Write-Host "RADIO KEYING:"
 Write-Host "  port : $radioPort"
