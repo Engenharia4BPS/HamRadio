@@ -32,13 +32,14 @@ $runtime = Require-Script "ensure-runtime.ps1"
 $planMigration = Require-Script "plan-migration.ps1"
 $applyMigration = Require-Script "apply-migration.ps1"
 $migrateService = Require-Script "migrate-service.ps1"
+$prepareClean = Require-Script "prepare-clean-install.ps1"
 
 $json = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $detect -InstallRoot $InstallRoot -AsJson
 if ($LASTEXITCODE -ne 0) { throw "Installation detector failed." }
 $state = $json | ConvertFrom-Json
 
 Write-Host ""
-Write-Host "GADX Vector Setup - Phase D4 Orchestrator" -ForegroundColor Cyan
+Write-Host "GADX Vector Setup - Phase D4/D5 Orchestrator" -ForegroundColor Cyan
 Write-Host "Install root : $InstallRoot"
 Write-Host "Detected     : $($state.classification)"
 Write-Host "Mode         : $($state.recommended_mode)"
@@ -51,16 +52,30 @@ switch ($state.recommended_mode) {
     }
     "INSTALL" {
         Write-Host "Clean installation detected." -ForegroundColor Yellow
-        Write-Host "D4 will prepare runtime/com0com. Initial station configuration, Port Manager and reboot flow are completed in D5."
         if (-not $Apply) {
+            Write-Host ""
+            Write-Host "Step 1 - runtime/com0com:"
             Invoke-Step $runtime @('-InstallRoot',$InstallRoot)
             Write-Host ""
-            Write-Host "PREVIEW complete. Use -Apply to prepare runtime/com0com." -ForegroundColor Yellow
+            Write-Host "Step 2 - clean station preparation:"
+            Write-Host "  -> Deploy Vector Hub, TS-2000 adapter, Windows service code and Port Manager."
+            Write-Host "  -> Create an initial vector.ini without overwriting an existing configuration."
+            Write-Host "  -> Open Port Manager for operator review and COM-pair creation."
+            Write-Host "  -> Mark reboot pending if virtual COM pairs change."
+            Write-Host "  -> Do not start GADXVectorHub until [radio_keying] and [rig] are reviewed."
+            Write-Host ""
+            Write-Host "PREVIEW complete. Re-run with -Apply to execute the clean-install preparation." -ForegroundColor Yellow
             exit 0
         }
+
+        Write-Host "[1/2] Ensuring runtime and com0com..."
         Invoke-Step $runtime @('-InstallRoot',$InstallRoot,'-Apply')
         Write-Host ""
-        Write-Host "Clean-install environment prepared. Continue with D5 Port Manager/configuration." -ForegroundColor Green
+        Write-Host "[2/2] Deploying current generation and opening Port Manager..."
+        Invoke-Step $prepareClean @('-InstallRoot',$InstallRoot,'-Apply')
+        Write-Host ""
+        Write-Host "Clean-install preparation completed successfully." -ForegroundColor Green
+        Write-Host "Next: review station-specific [radio_keying] and [rig], then run the service transaction."
         exit 0
     }
     "MIGRATE" { }
@@ -83,8 +98,6 @@ if (-not $Apply) {
 
     Write-Host ""
     Write-Host "Step 3 - payload/service transaction:"
-    # migrate-service preview requires a current vector.ini. For a legacy install
-    # that file only exists after D2 Apply, so show the planned action ourselves.
     if ($state.migration_required -and -not (Test-Path (Join-Path $InstallRoot 'config\vector.ini') -PathType Leaf)) {
         Write-Host "  After vector.ini migration, current payload will be deployed and GADXVectorHub will replace GADXVectorBridge transactionally."
     } else {
@@ -117,4 +130,3 @@ Invoke-Step $migrateService @('-InstallRoot',$InstallRoot,'-Apply')
 Write-Host ""
 Write-Host "D4 completed successfully." -ForegroundColor Green
 Write-Host "The machine is now on the current GADX Vector Hub generation."
-Write-Host "Next: D5 opens Port Manager for review/configuration and handles reboot state."
