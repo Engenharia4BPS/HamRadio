@@ -24,11 +24,12 @@ class Com0Com:
  def si(self):
   if sys.platform!="win32":return None
   x=subprocess.STARTUPINFO();x.dwFlags|=SU;x.wShowWindow=0;return x
- def run(self,args,timeout=8,input=None):return subprocess.run([str(self.exe)]+args,input=input,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,cwd=str(self.exe.parent),encoding="utf-8",errors="replace",timeout=timeout,startupinfo=self.si(),creationflags=CNW).stdout or ""
+ def run_result(self,args,timeout=8,input=None):return subprocess.run([str(self.exe)]+args,input=input,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,cwd=str(self.exe.parent),encoding="utf-8",errors="replace",timeout=timeout,startupinfo=self.si(),creationflags=CNW)
+ def run(self,args,timeout=8,input=None):return self.run_result(args,timeout,input).stdout or ""
  def query(self,args,cmd):
   try:
-   o=self.run(args)
-   if o.strip():return o
+   p=self.run_result(args)
+   if p.returncode==0:return p.stdout or ""
   except Exception:pass
   return self.run([],12,"\n".join([cmd,"quit",""]))
  def list_pairs(self):
@@ -95,7 +96,7 @@ class App(tk.Tk):
   p=ttk.LabelFrame(self,text="Clientes e pares virtuais desejados",padding=8);p.pack(fill="both",expand=True,padx=10,pady=8);self.table=ttk.Frame(p);self.table.pack(fill="x");ttk.Label(self.table,text="Cliente",font=("Segoe UI",9,"bold")).grid(row=0,column=0,rowspan=2);ttk.Label(self.table,text="CAT",font=("Segoe UI",9,"bold")).grid(row=0,column=1,columnspan=4);ttk.Label(self.table,text="KEYING",font=("Segoe UI",9,"bold")).grid(row=0,column=6,columnspan=4)
   for c,x in {1:"Tipo",2:"Aplicativo",4:"Vector",6:"Tipo",7:"Aplicativo",9:"Vector"}.items():ttk.Label(self.table,text=x).grid(row=1,column=c)
   b=ttk.Frame(p);b.pack(fill="x",pady=10);ttk.Button(b,text="+ Adicionar cliente",command=self.add).pack(side="left");ttk.Button(b,text="Sugestao 2 clientes",command=self.suggest).pack(side="left",padx=6)
-  self.msg=tk.StringVar(value="v0.12: ajuda orientada ao operador.");ttk.Label(self,textvariable=self.msg,padding=10).pack(side="bottom",fill="x");a=ttk.Frame(self,padding=10);a.pack(side="bottom",fill="x");ttk.Button(a,text="Carregar configuracao atual",command=self.load).pack(side="left");ttk.Button(a,text="Recarregar inventario",command=lambda:self.refresh(True)).pack(side="left",padx=6);ttk.Button(a,text="Aplicar configuracao",command=self.apply).pack(side="right")
+  self.msg=tk.StringVar(value="v0.13: inventario com0com robusto para instalacao limpa.");ttk.Label(self,textvariable=self.msg,padding=10).pack(side="bottom",fill="x");a=ttk.Frame(self,padding=10);a.pack(side="bottom",fill="x");ttk.Button(a,text="Carregar configuracao atual",command=self.load).pack(side="left");ttk.Button(a,text="Recarregar inventario",command=lambda:self.refresh(True)).pack(side="left",padx=6);ttk.Button(a,text="Aplicar configuracao",command=self.apply).pack(side="right")
  def work(self,title,fn,ok):
   self.progress=Progress(self,title)
   def r():
