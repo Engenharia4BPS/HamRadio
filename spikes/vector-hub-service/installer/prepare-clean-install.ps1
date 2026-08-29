@@ -75,6 +75,48 @@ function Get-FreeVectorPorts([string]$SetupExe,[int]$Count = 4) {
     return $ports
 }
 
+function Get-ConfiguredVectorPorts {
+    if (-not (Test-Path $VectorIni -PathType Leaf)) { return @() }
+    $lines = Get-Content -Path $VectorIni
+    $section = ""
+    $ports = @()
+
+    foreach ($line in $lines) {
+        $trim = ([string]$line).Trim()
+        if ($trim -match '^\[([^\]]+)\]$') {
+            $section = $Matches[1].ToLowerInvariant()
+            continue
+        }
+        if (-not $trim -or $trim.StartsWith(';') -or $trim.StartsWith('#')) { continue }
+
+        if ($section -eq 'cat' -and $trim -match '^ports\s*=\s*(.+)$') {
+            foreach ($item in $Matches[1].Split(',')) {
+                $p = $item.Trim().ToUpperInvariant()
+                if ($p -match '^COM\d+$') { $ports += $p }
+            }
+        }
+        elseif ($section -eq 'keying' -and $trim -match '^client\d+\s*=\s*(.+)$') {
+            $parts = @($Matches[1].Split(',') | ForEach-Object { $_.Trim() })
+            if ($parts.Count -ge 4) { $p = $parts[1].ToUpperInvariant() }
+            elseif ($parts.Count -ge 3) { $p = $parts[0].ToUpperInvariant() }
+            else { $p = "" }
+            if ($p -match '^COM\d+$') { $ports += $p }
+        }
+    }
+
+    return @($ports | Select-Object -Unique)
+}
+
+function Get-MissingVectorPorts([string]$Snapshot) {
+    $missing = @()
+    foreach ($port in (Get-ConfiguredVectorPorts)) {
+        if ($Snapshot -notmatch ('(?i)\b' + [regex]::Escape($port) + '\b')) {
+            $missing += $port
+        }
+    }
+    return $missing
+}
+
 function Write-InitialVectorIni([int[]]$InternalPorts) {
     $cat1 = $InternalPorts[0]
     $key1 = $InternalPorts[1]
@@ -159,8 +201,9 @@ if (-not $Apply) {
     Write-Host "  1. Deploy current app/service/tools payload."
     Write-Host "  2. Create initial vector.ini only if it does not exist, allocating free internal COMs from COM101 upward."
     Write-Host "  3. Open Port Manager and wait for the operator to review/apply COM pairs."
-    Write-Host "  4. Detect whether com0com pairs changed and mark reboot pending when needed."
-    Write-Host "  5. Preserve existing vector.ini and existing COM pairs whenever present."
+    Write-Host "  4. Validate that every CAT/KEYING Vector COM in vector.ini exists in com0com."
+    Write-Host "  5. Detect whether com0com pairs changed and mark reboot pending when needed."
+    Write-Host "  6. Preserve existing vector.ini and existing COM pairs whenever present."
     exit 0
 }
 
@@ -191,13 +234,23 @@ $p = Start-Process -FilePath $PythonExe -ArgumentList @($PortManager) -Wait -Pas
 if ($p.ExitCode -ne 0) { throw "Port Manager exited with code $($p.ExitCode)." }
 
 $after = Get-Com0comSnapshot $com0com
+$missing = @(Get-MissingVectorPorts $after)
+if ($missing.Count -gt 0) {
+    Write-Host "" 
+    Write-Host "Clean-install COM validation failed." -ForegroundColor Red
+    Write-Host "The following Vector ports from vector.ini were not found in com0com: $($missing -join ', ')" -ForegroundColor Red
+    Write-Host "Open Port Manager, apply the required pairs, close it, and run this D5 step again." -ForegroundColor Yellow
+    throw "D5 incomplete: required virtual COM pairs are missing."
+}
+
 if ($before -ne $after) {
     Set-Content -Path $RebootMarker -Value ("Virtual COM configuration changed on " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss")) -Encoding ASCII
     Write-Host "Virtual COM configuration changed. Reboot is now pending." -ForegroundColor Yellow
 } else {
-    Write-Host "No com0com pair change detected during this run."
+    Write-Host "No com0com pair change detected during this run; required Vector COM pairs are already present."
 }
 
+Write-Host "Required Vector COM validation: OK" -ForegroundColor Green
 Write-Host ""
 Write-Host "D5 clean-install preparation completed." -ForegroundColor Green
 Write-Host "vector.ini    : $VectorIni"
