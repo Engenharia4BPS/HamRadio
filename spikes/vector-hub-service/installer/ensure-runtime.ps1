@@ -12,6 +12,10 @@ $ThirdPartyCandidates = @(
     (Join-Path $InstallerRoot "thirdparty")
 )
 $PythonExe = Join-Path $RuntimeDir "python.exe"
+$PythonVersion = "3.10.11"
+$PythonDownloadUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
+$DownloadCache = Join-Path $InstallerRoot "cache"
+$DownloadedPythonInstaller = Join-Path $DownloadCache "python-$PythonVersion-amd64.exe"
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -46,8 +50,30 @@ function Test-Runtime {
     return ($LASTEXITCODE -eq 0)
 }
 
+function Get-PythonInstaller([switch]$Download) {
+    $bundled = Find-BundledFile "python-installer.exe"
+    if ($bundled) { return $bundled }
+    if (Test-Path $DownloadedPythonInstaller -PathType Leaf) { return $DownloadedPythonInstaller }
+    if (-not $Download) { return $null }
+
+    New-Item -ItemType Directory -Force -Path $DownloadCache | Out-Null
+    Write-Host "Downloading official Python $PythonVersion installer from python.org..."
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -UseBasicParsing -Uri $PythonDownloadUrl -OutFile $DownloadedPythonInstaller
+    }
+    catch {
+        if (Test-Path $DownloadedPythonInstaller) { Remove-Item -Force $DownloadedPythonInstaller -ErrorAction SilentlyContinue }
+        throw "Unable to download Python $PythonVersion from python.org. $($_.Exception.Message)"
+    }
+    if (-not (Test-Path $DownloadedPythonInstaller -PathType Leaf)) {
+        throw "Python download finished but installer file was not created."
+    }
+    return $DownloadedPythonInstaller
+}
+
 Assert-Administrator
-$pythonInstaller = Find-BundledFile "python-installer.exe"
+$pythonInstaller = Get-PythonInstaller
 $com0comInstaller = Find-BundledFile "com0com-installer.exe"
 $com0comSetup = Find-Com0comSetup
 $runtimeOk = Test-Runtime
@@ -57,13 +83,16 @@ Write-Host "GADX Vector - Runtime/com0com ensure" -ForegroundColor Cyan
 Write-Host "Install root : $InstallRoot"
 Write-Host "Runtime      : $(if ($runtimeOk) { 'OK' } elseif (Test-Path $PythonExe) { 'INCOMPLETE' } else { 'MISSING' })"
 Write-Host "com0com      : $(if ($com0comSetup) { $com0comSetup } else { 'not installed' })"
-Write-Host "Python setup : $(if ($pythonInstaller) { $pythonInstaller } else { 'not bundled' })"
+Write-Host "Python setup : $(if ($pythonInstaller) { $pythonInstaller } else { 'will download official Python 3.10.11 from python.org' })"
 Write-Host "com0com setup: $(if ($com0comInstaller) { $com0comInstaller } else { 'not bundled' })"
 Write-Host ""
 
 if (-not $Apply) {
     Write-Host "PREVIEW ONLY - no changes were made." -ForegroundColor Yellow
-    if (-not $runtimeOk) { Write-Host "  -> Private Python runtime will be installed/repaired with Tcl/Tk, pip, pyserial and pywin32." }
+    if (-not $runtimeOk) {
+        if (-not $pythonInstaller) { Write-Host "  -> Official Python $PythonVersion installer will be downloaded from python.org." }
+        Write-Host "  -> Private Python runtime will be installed/repaired with Tcl/Tk, pip, pyserial and pywin32."
+    }
     if (-not $com0comSetup) { Write-Host "  -> com0com will be installed if its bundled installer is available." }
     exit 0
 }
@@ -89,9 +118,9 @@ if (-not $com0comSetup) {
 }
 
 if (-not $runtimeOk) {
-    if (-not $pythonInstaller) { throw "Private runtime is missing/incomplete and bundled python-installer.exe was not found." }
+    $pythonInstaller = Get-PythonInstaller -Download
     New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
-    Write-Host "Installing/repairing private Python runtime with Tcl/Tk..."
+    Write-Host "Installing/repairing private Python $PythonVersion runtime with Tcl/Tk..."
     $args = @(
         '/quiet',
         'InstallAllUsers=1',
@@ -123,6 +152,7 @@ if (-not $runtimeOk) {
         $postPy = Join-Path $RuntimeDir "Scripts\pywin32_postinstall.py"
         if (Test-Path $postExe -PathType Leaf) { & $postExe -install }
         elseif (Test-Path $postPy -PathType Leaf) { & $PythonExe $postPy -install }
+        else { throw "pywin32 post-install tool was not found." }
         if ($LASTEXITCODE -ne 0) { throw "pywin32 post-install failed." }
     }
 }
