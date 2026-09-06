@@ -119,6 +119,25 @@ function Write-BuildManifest([string]$BackupRoot) {
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add("installed_utc = $([DateTime]::UtcNow.ToString('o'))") | Out-Null
     $lines.Add("installer_phase = D7") | Out-Null
+
+    $releasePath = Join-Path $InstallerRoot "release.json"
+    if (Test-Path $releasePath -PathType Leaf) {
+        try {
+            $release = Get-Content -LiteralPath $releasePath -Raw | ConvertFrom-Json
+            if ($release.product) { $lines.Add("product = $([string]$release.product)") | Out-Null }
+            if ($release.version) { $lines.Add("product_version = $([string]$release.version)") | Out-Null }
+            if ($release.phase) { $lines.Add("release_phase = $([string]$release.phase)") | Out-Null }
+            if ($release.channel) { $lines.Add("release_channel = $([string]$release.channel)") | Out-Null }
+            if ($release.baseline) { $lines.Add("release_baseline = $([string]$release.baseline)") | Out-Null }
+        }
+        catch {
+            $lines.Add("release_metadata = invalid") | Out-Null
+        }
+    }
+    else {
+        $lines.Add("release_metadata = missing") | Out-Null
+    }
+
     $lines.Add("backup = $BackupRoot") | Out-Null
     foreach ($relative in @("app\vector_hub.py","app\ts2000.py","service\vector_service.py","tools\port_manager.py")) {
         $path = Join-Path $InstallRoot $relative
