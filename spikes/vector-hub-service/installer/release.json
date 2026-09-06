@@ -1,7 +1,7 @@
 {
   "product": "GADX Vector",
-  "version": "0.8.0-dev.1",
-  "phase": "D8A",
+  "version": "0.8.0-dev.2",
+  "phase": "D8B",
   "channel": "development",
   "baseline": "D7-field-validated-2026-09-06",
   "repository": "Engenharia4BPS/HamRadio",
