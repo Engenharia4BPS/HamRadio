@@ -1,6 +1,7 @@
 param(
     [string]$InstallRoot = "C:\Ham\GADX-Vector",
-    [switch]$Apply
+    [switch]$Apply,
+    [switch]$AsJson
 )
 
 $ErrorActionPreference = "Stop"
@@ -104,6 +105,22 @@ if ($payloadDrift -and $state.recommended_mode -eq "NONE") {
     $state.recommended_mode = "REPAIR"
 }
 $currentRepair = ($state.classification -eq "CURRENT" -and $state.recommended_mode -eq "REPAIR")
+
+if ($AsJson) {
+    $releaseLabel = Get-ReleaseLabel
+    [ordered]@{
+        schema_version = 1
+        release = $releaseLabel
+        install_root = $InstallRoot
+        classification = [string]$state.classification
+        recommended_mode = [string]$state.recommended_mode
+        payload_drift = [bool]$payloadDrift
+        migration_required = [bool]$state.migration_required
+        repair_required = [bool]($state.repair_required -or $payloadDrift)
+        detector = $state
+    } | ConvertTo-Json -Depth 10
+    exit 0
+}
 
 Write-Host ""
 Write-Host "GADX Vector Setup - D1-D7 Backend Orchestrator" -ForegroundColor Cyan
