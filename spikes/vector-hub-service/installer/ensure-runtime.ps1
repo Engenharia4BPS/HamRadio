@@ -46,8 +46,118 @@ function Find-Com0comSetup {
 
 function Test-Runtime {
     if (-not (Test-Path $PythonExe -PathType Leaf)) { return $false }
-    & $PythonExe -c "import tkinter, serial, win32serviceutil, servicemanager" *> $null
-    return ($LASTEXITCODE -eq 0)
+    $oldNoUserSite = $env:PYTHONNOUSERSITE
+    try {
+        $env:PYTHONNOUSERSITE = "1"
+        & $PythonExe -c "import tkinter, serial, win32serviceutil, servicemanager" *> $null
+        return ($LASTEXITCODE -eq 0)
+    }
+    finally {
+        $env:PYTHONNOUSERSITE = $oldNoUserSite
+    }
+}
+
+function Test-CompatiblePython([string]$Candidate) {
+    if (-not $Candidate -or -not (Test-Path $Candidate -PathType Leaf)) { return $false }
+    try {
+        $probe = & $Candidate -c 'import struct,sys,tkinter; print("%d.%d.%d|%d" % (sys.version_info[0],sys.version_info[1],sys.version_info[2],struct.calcsize("P")*8))' 2>$null
+        if ($LASTEXITCODE -ne 0) { return $false }
+        return ([string]$probe).Trim() -eq "$PythonVersion|64"
+    }
+    catch { return $false }
+}
+
+function Add-PythonCandidate([System.Collections.Generic.List[string]]$List,[string]$Candidate) {
+    if (-not $Candidate) { return }
+    try { $Candidate = [System.IO.Path]::GetFullPath($Candidate) } catch { return }
+    if ($Candidate -ieq $PythonExe) { return }
+    if (-not $List.Contains($Candidate)) { [void]$List.Add($Candidate) }
+}
+
+function Find-CompatiblePython {
+    $candidates = New-Object 'System.Collections.Generic.List[string]'
+
+    try {
+        $py = Get-Command py.exe -ErrorAction SilentlyContinue
+        if ($py) {
+            $resolved = & $py.Source -3.10 -c 'import sys; print(sys.executable)' 2>$null
+            if ($LASTEXITCODE -eq 0) { Add-PythonCandidate $candidates ([string]$resolved).Trim() }
+        }
+    } catch {}
+
+    foreach ($registryRoot in @(
+        'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Python\PythonCore',
+        'Registry::HKEY_CURRENT_USER\SOFTWARE\Python\PythonCore',
+        'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Python\PythonCore'
+    )) {
+        if (-not (Test-Path $registryRoot)) { continue }
+        foreach ($versionKey in @(Get-ChildItem -LiteralPath $registryRoot -ErrorAction SilentlyContinue)) {
+            if ($versionKey.PSChildName -notlike '3.10*') { continue }
+            $installKey = Join-Path $versionKey.PSPath 'InstallPath'
+            if (-not (Test-Path $installKey)) { continue }
+            try {
+                $props = Get-ItemProperty -LiteralPath $installKey -ErrorAction SilentlyContinue
+                if ($props.ExecutablePath) { Add-PythonCandidate $candidates ([string]$props.ExecutablePath) }
+            } catch {}
+            try {
+                $dir = (Get-Item -LiteralPath $installKey).GetValue('')
+                if ($dir) { Add-PythonCandidate $candidates (Join-Path ([string]$dir) 'python.exe') }
+            } catch {}
+        }
+    }
+
+    try {
+        foreach ($cmd in @(Get-Command python.exe -All -ErrorAction SilentlyContinue)) {
+            Add-PythonCandidate $candidates $cmd.Source
+        }
+    } catch {}
+
+    foreach ($candidate in $candidates) {
+        if (Test-CompatiblePython $candidate) { return $candidate }
+    }
+    return $null
+}
+
+function Initialize-PrivateRuntimeFromExisting([string]$SourcePython) {
+    if (-not (Test-CompatiblePython $SourcePython)) {
+        throw "Existing Python candidate is not compatible with the required $PythonVersion x64 + Tcl/Tk runtime: $SourcePython"
+    }
+
+    $sourceRoot = Split-Path -Parent $SourcePython
+    if ([System.IO.Path]::GetFullPath($sourceRoot) -ieq [System.IO.Path]::GetFullPath($RuntimeDir)) { return }
+
+    Write-Host "Creating isolated Vector runtime from existing compatible Python: $SourcePython"
+    if (Test-Path $RuntimeDir) { Remove-Item -LiteralPath $RuntimeDir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
+    Copy-Item -Path (Join-Path $sourceRoot '*') -Destination $RuntimeDir -Recurse -Force
+
+    if (-not (Test-Path $PythonExe -PathType Leaf)) {
+        throw "Existing Python copy completed but runtime\python.exe is missing."
+    }
+
+    # Do not inherit third-party packages from the machine-wide/user installation.
+    $sitePackages = Join-Path $RuntimeDir 'Lib\site-packages'
+    if (Test-Path $sitePackages) {
+        Get-ChildItem -LiteralPath $sitePackages -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        New-Item -ItemType Directory -Force -Path $sitePackages | Out-Null
+    }
+    $scripts = Join-Path $RuntimeDir 'Scripts'
+    if (Test-Path $scripts) {
+        Get-ChildItem -LiteralPath $scripts -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        New-Item -ItemType Directory -Force -Path $scripts | Out-Null
+    }
+
+    $oldNoUserSite = $env:PYTHONNOUSERSITE
+    try {
+        $env:PYTHONNOUSERSITE = "1"
+        & $PythonExe -m ensurepip --upgrade
+        if ($LASTEXITCODE -ne 0) { throw "ensurepip failed while preparing the private runtime." }
+    }
+    finally {
+        $env:PYTHONNOUSERSITE = $oldNoUserSite
+    }
 }
 
 function Get-PythonInstaller([switch]$Download) {
@@ -77,21 +187,28 @@ $pythonInstaller = Get-PythonInstaller
 $com0comInstaller = Find-BundledFile "com0com-installer.exe"
 $com0comSetup = Find-Com0comSetup
 $runtimeOk = Test-Runtime
+$existingCompatiblePython = if (-not $runtimeOk) { Find-CompatiblePython } else { $null }
 
 Write-Host ""
 Write-Host "GADX Vector - Runtime/com0com ensure" -ForegroundColor Cyan
 Write-Host "Install root : $InstallRoot"
 Write-Host "Runtime      : $(if ($runtimeOk) { 'OK' } elseif (Test-Path $PythonExe) { 'INCOMPLETE' } else { 'MISSING' })"
 Write-Host "com0com      : $(if ($com0comSetup) { $com0comSetup } else { 'not installed' })"
-Write-Host "Python setup : $(if ($pythonInstaller) { $pythonInstaller } else { 'will download official Python 3.10.11 from python.org' })"
+Write-Host "Python setup : $(if ($existingCompatiblePython) { "compatible existing Python: $existingCompatiblePython" } elseif ($pythonInstaller) { $pythonInstaller } else { 'will download official Python 3.10.11 from python.org' })"
 Write-Host "com0com setup: $(if ($com0comInstaller) { $com0comInstaller } else { 'not bundled' })"
 Write-Host ""
 
 if (-not $Apply) {
     Write-Host "PREVIEW ONLY - no changes were made." -ForegroundColor Yellow
     if (-not $runtimeOk) {
-        if (-not $pythonInstaller) { Write-Host "  -> Official Python $PythonVersion installer will be downloaded from python.org." }
-        Write-Host "  -> Private Python runtime will be installed/repaired with Tcl/Tk, pip, pyserial and pywin32."
+        if ($existingCompatiblePython) {
+            Write-Host "  -> A compatible Python $PythonVersion x64 installation already exists on this machine."
+            Write-Host "  -> It will be copied into the private Vector runtime without altering the existing installation."
+        } else {
+            if (-not $pythonInstaller) { Write-Host "  -> Official Python $PythonVersion installer will be downloaded from python.org." }
+            Write-Host "  -> Private Python runtime will be installed/repaired with Tcl/Tk, pip, pyserial and pywin32."
+            Write-Host "  -> If the official installer reuses an existing same-version installation instead of TargetDir, Vector will clone that compatible runtime automatically."
+        }
     }
     if (-not $com0comSetup) { Write-Host "  -> com0com will be installed if its bundled installer is available." }
     exit 0
@@ -118,33 +235,58 @@ if (-not $com0comSetup) {
 }
 
 if (-not $runtimeOk) {
-    $pythonInstaller = Get-PythonInstaller -Download
-    New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
-    Write-Host "Installing/repairing private Python $PythonVersion runtime with Tcl/Tk..."
-    $args = @(
-        '/quiet',
-        'InstallAllUsers=1',
-        "TargetDir=$RuntimeDir",
-        'PrependPath=0',
-        'AppendPath=0',
-        'AssociateFiles=0',
-        'Shortcuts=0',
-        'Include_launcher=0',
-        'Include_doc=0',
-        'Include_test=0',
-        'Include_tcltk=1',
-        'Include_pip=1',
-        'Include_exe=1',
-        'Include_lib=1',
-        'Include_dev=1'
-    )
-    $p = Start-Process -FilePath $pythonInstaller -ArgumentList $args -Wait -PassThru
-    if ($p.ExitCode -ne 0) { throw "Private Python installation/repair failed with exit code $($p.ExitCode)." }
-    if (-not (Test-Path $PythonExe -PathType Leaf)) { throw "Python installer finished but runtime\python.exe is missing." }
+    if ($existingCompatiblePython) {
+        Initialize-PrivateRuntimeFromExisting $existingCompatiblePython
+    } else {
+        $pythonInstaller = Get-PythonInstaller -Download
+        New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
+        Write-Host "Installing/repairing private Python $PythonVersion runtime with Tcl/Tk..."
+        $args = @(
+            '/quiet',
+            'InstallAllUsers=1',
+            "TargetDir=$RuntimeDir",
+            'PrependPath=0',
+            'AppendPath=0',
+            'AssociateFiles=0',
+            'Shortcuts=0',
+            'Include_launcher=0',
+            'Include_doc=0',
+            'Include_test=0',
+            'Include_tcltk=1',
+            'Include_pip=1',
+            'Include_exe=1',
+            'Include_lib=1',
+            'Include_dev=1'
+        )
+        $p = Start-Process -FilePath $pythonInstaller -ArgumentList $args -Wait -PassThru
+        if ($p.ExitCode -ne 0) { throw "Private Python installation/repair failed with exit code $($p.ExitCode)." }
+
+        if (-not (Test-Path $PythonExe -PathType Leaf)) {
+            # CPython's traditional Windows installer intentionally reuses an existing
+            # installation of the same version and may ignore TargetDir. In that case,
+            # clone the now-compatible installation into Vector's private runtime.
+            $fallbackPython = Find-CompatiblePython
+            if ($fallbackPython) {
+                Write-Host "Python installer reused an existing machine installation; cloning it into the Vector private runtime..." -ForegroundColor Yellow
+                Initialize-PrivateRuntimeFromExisting $fallbackPython
+            }
+        }
+
+        if (-not (Test-Path $PythonExe -PathType Leaf)) {
+            throw "Python installer finished but runtime\python.exe is missing and no compatible Python $PythonVersion x64 installation could be cloned."
+        }
+    }
 
     Write-Host "Installing Python dependencies..."
-    & $PythonExe -m pip install --disable-pip-version-check --upgrade "pyserial==3.5" "pywin32==312"
-    if ($LASTEXITCODE -ne 0) { throw "Failed to install pyserial/pywin32." }
+    $oldNoUserSite = $env:PYTHONNOUSERSITE
+    try {
+        $env:PYTHONNOUSERSITE = "1"
+        & $PythonExe -m pip install --disable-pip-version-check --upgrade "pyserial==3.5" "pywin32==312"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to install pyserial/pywin32." }
+    }
+    finally {
+        $env:PYTHONNOUSERSITE = $oldNoUserSite
+    }
 
     $pythonService = Join-Path $RuntimeDir "pythonservice.exe"
     if (-not (Test-Path $pythonService -PathType Leaf)) {
