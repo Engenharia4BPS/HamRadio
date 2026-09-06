@@ -47,6 +47,31 @@ function Test-PayloadDrift {
     return $false
 }
 
+function Wait-ServiceState([string]$Name,[string]$State,[int]$Seconds=12) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    do {
+        $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+        if ($svc -and [string]$svc.Status -eq $State) { return $true }
+        Start-Sleep -Milliseconds 300
+    } while ((Get-Date) -lt $deadline)
+    return $false
+}
+
+function Quiesce-CurrentHub {
+    $svc = Get-Service -Name "GADXVectorHub" -ErrorAction SilentlyContinue
+    if (-not $svc) { return }
+
+    Write-Host "Safety: disabling GADXVectorHub before runtime/update work..." -ForegroundColor Yellow
+    & sc.exe config GADXVectorHub start= disabled | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not temporarily disable GADXVectorHub before D7 repair." }
+
+    try { Stop-Service -Name "GADXVectorHub" -Force -ErrorAction SilentlyContinue } catch {}
+    if (-not (Wait-ServiceState "GADXVectorHub" "Stopped" 12)) {
+        throw "Could not keep GADXVectorHub stopped before D7 repair. Update was aborted for radio safety."
+    }
+    Write-Host "Safety: GADXVectorHub is Disabled / Stopped." -ForegroundColor Green
+}
+
 Assert-Administrator
 $detect = Require-Script "detect-installation.ps1"
 $runtime = Require-Script "ensure-runtime.ps1"
@@ -117,6 +142,13 @@ switch ($state.recommended_mode) {
 if (-not $Apply) {
     Write-Host "PREVIEW ONLY - orchestrator will not modify the machine." -ForegroundColor Yellow
     Write-Host ""
+    if ($currentRepair) {
+        $previewSvc = Get-Service -Name "GADXVectorHub" -ErrorAction SilentlyContinue
+        Write-Host "D7 safety gate:"
+        Write-Host "  -> On Apply, GADXVectorHub will be set Disabled and forced Stopped BEFORE runtime/download/update work."
+        Write-Host "  -> Current service status: $(if ($previewSvc) { [string]$previewSvc.Status } else { 'not installed' })"
+        Write-Host ""
+    }
     Write-Host "Step 1 - runtime/com0com:"
     Invoke-Step $runtime @('-InstallRoot',$InstallRoot)
 
@@ -150,6 +182,9 @@ if (-not $Apply) {
 
 if ($currentRepair) {
     Write-Host "Executing D7 CURRENT/REPAIR plan..."
+    Write-Host ""
+    Write-Host "[0/2] Quiescing the currently installed Hub for radio safety..."
+    Quiesce-CurrentHub
     Write-Host ""
     Write-Host "[1/2] Ensuring runtime and com0com..."
     Invoke-Step $runtime @('-InstallRoot',$InstallRoot,'-Apply')
