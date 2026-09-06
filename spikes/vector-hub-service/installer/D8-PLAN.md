@@ -55,7 +55,26 @@ setup-vector.ps1 -AsJson
 
 `setup-vector.ps1 -AsJson` e a interface read-only entre o backend validado e a GUI. Ela inclui classificacao, modo recomendado, payload drift e o resultado completo do detector, evitando que o launcher replique as regras do orquestrador.
 
-**Status: EM IMPLEMENTACAO / TESTE.**
+### Validacao D8B.1 — CURRENT saudavel
+
+Data: 2026-09-06
+
+O launcher grafico foi aberto em uma instalacao CURRENT saudavel e exibiu corretamente:
+
+```text
+Release        0.8.0-dev.2 / development / D8B
+Detected       CURRENT
+Recommended    NONE
+Payload drift  NO
+Service        Running
+Runtime        OK
+com0com        OK
+Safety         No changes required
+```
+
+A GUI mostrou `Healthy installation`, manteve `Apply` desabilitado e refletiu o mesmo estado reportado pelo backend em Preview (`CURRENT / NONE / Payload drift: NO`).
+
+**Status: D8B.1 VALIDADA EM CAMPO; fluxo do botao Run Preview ainda em validacao.**
 
 ---
 
