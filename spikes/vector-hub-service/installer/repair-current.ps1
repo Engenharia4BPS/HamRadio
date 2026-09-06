@@ -160,7 +160,7 @@ if (-not $Apply) {
     Write-Host "  6. Reinstall GADXVectorHub as delayed-auto with recovery actions."
     Write-Host "  7. Start it and require a fresh 'Vector Hub ready' log plus PTT=OFF through rigctld."
     Write-Host "  8. Remove stale GADXVectorBridge only after the new Hub is healthy."
-    Write-Host "  9. If anything fails, restore the backed-up files and leave GADXVectorHub stopped/disabled for safety."
+    Write-Host "  9. If anything fails, preserve the failed Hub log, restore the backup and leave GADXVectorHub stopped/disabled."
     Write-Host ""
     Write-Host "vector.ini and virtual COM pairs are never rewritten by D7." -ForegroundColor Green
     if (-not $runtimeReady) { Write-Host "Preview note: runtime is currently missing; setup-vector will create it before D7 Apply." -ForegroundColor Yellow }
@@ -267,9 +267,24 @@ try {
 catch {
     $failure = $_.Exception.Message
     Write-Warning "D7 repair failed: $failure"
-    Write-Warning "Restoring backed-up application files and leaving the Hub stopped/disabled for safety..."
+    Write-Warning "Preserving failed Hub evidence, restoring backed-up application files and leaving the Hub stopped/disabled for safety..."
 
     try { Remove-CurrentService $ServiceScript } catch {}
+
+    if (Test-Path $HubLog -PathType Leaf) {
+        $failedLog = Join-Path $BackupRoot "logs\failed-vector-hub.log"
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $failedLog) | Out-Null
+        Copy-Item -LiteralPath $HubLog -Destination $failedLog -Force -ErrorAction SilentlyContinue
+        if (Test-Path $failedLog -PathType Leaf) {
+            Write-Warning "Failed Hub log preserved at: $failedLog"
+            $failedTail = @(Get-Content -LiteralPath $failedLog -Tail 40 -ErrorAction SilentlyContinue)
+            if ($failedTail.Count -gt 0) {
+                Write-Host "----- failed Vector Hub log tail -----" -ForegroundColor Yellow
+                $failedTail | ForEach-Object { Write-Host $_ }
+                Write-Host "--------------------------------------" -ForegroundColor Yellow
+            }
+        }
+    }
 
     foreach ($relative in $relativeFiles) {
         $source = Join-Path $BackupRoot $relative
