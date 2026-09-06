@@ -1,0 +1,13 @@
+{
+  "product": "GADX Vector",
+  "version": "0.8.0-dev.1",
+  "phase": "D8A",
+  "channel": "development",
+  "baseline": "D7-field-validated-2026-09-06",
+  "repository": "Engenharia4BPS/HamRadio",
+  "path": "spikes/vector-hub-service",
+  "supported_windows": [
+    "Windows 10",
+    "Windows 11"
+  ]
+}
