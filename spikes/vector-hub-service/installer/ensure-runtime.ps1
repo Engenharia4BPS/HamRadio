@@ -61,7 +61,7 @@ function Test-Runtime {
 function Get-PythonProbe([string]$Candidate) {
     if (-not $Candidate -or -not (Test-Path $Candidate -PathType Leaf)) { return $null }
     try {
-        $probe = & $Candidate -c 'import struct,sys,tkinter; print("%d.%d.%d|%d|%s" % (sys.version_info[0],sys.version_info[1],sys.version_info[2],struct.calcsize("P")*8,sys.executable))' 2>$null
+        $probe = & $Candidate -c "import struct,sys,tkinter; print('%d.%d.%d|%d|%s' % (sys.version_info[0],sys.version_info[1],sys.version_info[2],struct.calcsize('P')*8,sys.executable))" 2>$null
         if ($LASTEXITCODE -ne 0 -or -not $probe) { return $null }
         return ([string]$probe).Trim()
     }
@@ -71,7 +71,7 @@ function Get-PythonProbe([string]$Candidate) {
 function Test-CompatiblePython([string]$Candidate) {
     if (-not $Candidate -or -not (Test-Path $Candidate -PathType Leaf)) { return $false }
     try {
-        & $Candidate -c 'import struct,sys,tkinter; raise SystemExit(0 if sys.version_info[:2] == (3,10) and struct.calcsize("P")*8 == 64 else 1)' 2>$null
+        & $Candidate -c "import struct,sys,tkinter; raise SystemExit(0 if sys.version_info[:2] == (3,10) and struct.calcsize('P')*8 == 64 else 1)" 2>$null
         return ($LASTEXITCODE -eq 0)
     }
     catch { return $false }
