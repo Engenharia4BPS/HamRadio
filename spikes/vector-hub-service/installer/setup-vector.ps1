@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $InstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)
 $InstallerRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$PayloadRoot = Join-Path $InstallerRoot "payload"
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -26,6 +27,26 @@ function Invoke-Step([string]$Path,[string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "Installer step failed: $(Split-Path -Leaf $Path) (exit $LASTEXITCODE)" }
 }
 
+function Test-PayloadDrift {
+    $pairs = @(
+        @{ Installed = "app\vector_hub.py"; Payload = "app\vector_hub.py" },
+        @{ Installed = "app\ts2000.py"; Payload = "app\ts2000.py" },
+        @{ Installed = "service\vector_service.py"; Payload = "service\vector_service.py" },
+        @{ Installed = "tools\port_manager.py"; Payload = "tools\port_manager.py" }
+    )
+
+    foreach ($pair in $pairs) {
+        $installed = Join-Path $InstallRoot $pair.Installed
+        $payload = Join-Path $PayloadRoot $pair.Payload
+        if (-not (Test-Path $payload -PathType Leaf)) { continue }
+        if (-not (Test-Path $installed -PathType Leaf)) { return $true }
+        $installedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installed).Hash
+        $payloadHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $payload).Hash
+        if ($installedHash -ne $payloadHash) { return $true }
+    }
+    return $false
+}
+
 Assert-Administrator
 $detect = Require-Script "detect-installation.ps1"
 $runtime = Require-Script "ensure-runtime.ps1"
@@ -38,6 +59,10 @@ $prepareClean = Require-Script "prepare-clean-install.ps1"
 $json = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $detect -InstallRoot $InstallRoot -AsJson
 if ($LASTEXITCODE -ne 0) { throw "Installation detector failed." }
 $state = $json | ConvertFrom-Json
+$payloadDrift = ($state.classification -eq "CURRENT" -and (Test-PayloadDrift))
+if ($payloadDrift -and $state.recommended_mode -eq "NONE") {
+    $state.recommended_mode = "REPAIR"
+}
 $currentRepair = ($state.classification -eq "CURRENT" -and $state.recommended_mode -eq "REPAIR")
 
 Write-Host ""
@@ -45,6 +70,9 @@ Write-Host "GADX Vector Setup - Phase D4-D7 Orchestrator" -ForegroundColor Cyan
 Write-Host "Install root : $InstallRoot"
 Write-Host "Detected     : $($state.classification)"
 Write-Host "Mode         : $($state.recommended_mode)"
+if ($state.classification -eq "CURRENT") {
+    Write-Host "Payload drift: $(if ($payloadDrift) { 'YES - installed files differ from current installer payload' } else { 'NO' })"
+}
 Write-Host ""
 
 switch ($state.recommended_mode) {
