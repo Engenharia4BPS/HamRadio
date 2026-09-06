@@ -113,6 +113,26 @@ def _rigctld_ptt_off(host: str, port: int) -> None:
         pass
 
 
+def _clear_serial_outputs_safely(serial_port: str, baud: int) -> None:
+    """Open a serial port with RTS/DTR already deasserted, then leave it safe."""
+    port = None
+    try:
+        port = serial.Serial(port=None, baudrate=baud, timeout=0)
+        port.rts = False
+        port.dtr = False
+        port.port = serial_port
+        port.open()
+        port.rts = False
+        port.dtr = False
+    finally:
+        if port is not None and port.is_open:
+            try:
+                port.rts = False
+                port.dtr = False
+            finally:
+                port.close()
+
+
 def force_safe_state(path: Path) -> None:
     """Independent best-effort safety layer before/after child execution."""
     try:
@@ -127,11 +147,7 @@ def force_safe_state(path: Path) -> None:
 
         if serial_port:
             try:
-                with serial.Serial(serial_port, baud, timeout=0) as port:
-                    # Always clear both modem-control outputs. This is safe even
-                    # when one of them is unused or PTT itself is via rigctld.
-                    port.rts = False
-                    port.dtr = False
+                _clear_serial_outputs_safely(serial_port, baud)
             except Exception:
                 pass
 
