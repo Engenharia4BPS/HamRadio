@@ -182,7 +182,12 @@ def main():
     needs_serial=(c.radio_ptt_line in ("DTR","RTS")) or (c.radio_cw_line in ("DTR","RTS"))
     if needs_serial:
         if not c.radio_keying_port:LOG.error("serial keying enabled without physical port");return 2
-        try:out=serial.Serial(c.radio_keying_port,c.radio_keying_baud,timeout=0,write_timeout=None);out.rts=False;out.dtr=False
+        try:
+            out=serial.Serial(port=None,baudrate=c.radio_keying_baud,timeout=0,write_timeout=None)
+            out.rts=False;out.dtr=False
+            out.port=c.radio_keying_port
+            out.open()
+            out.rts=False;out.dtr=False
         except Exception as e:LOG.error("Cannot open physical keying port %s: %s",c.radio_keying_port,e);return 2
     threads=[];t=threading.Thread(target=poll_worker,args=(rig,state,c.rig_poll_ms,stop),daemon=True,name="RigPoll");t.start();threads.append(t)
     for x in c.keying_clients:
