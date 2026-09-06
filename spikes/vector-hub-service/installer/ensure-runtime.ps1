@@ -69,11 +69,12 @@ function Get-PythonProbe([string]$Candidate) {
 }
 
 function Test-CompatiblePython([string]$Candidate) {
-    $probe = Get-PythonProbe $Candidate
-    if (-not $probe) { return $false }
-    $parts = $probe.Split('|')
-    if ($parts.Count -lt 2) { return $false }
-    return ($parts[0] -like "$PythonSeries.*" -and $parts[1] -eq "64")
+    if (-not $Candidate -or -not (Test-Path $Candidate -PathType Leaf)) { return $false }
+    try {
+        & $Candidate -c 'import struct,sys,tkinter; raise SystemExit(0 if sys.version_info[:2] == (3,10) and struct.calcsize("P")*8 == 64 else 1)' 2>$null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch { return $false }
 }
 
 function Add-PythonCandidate([System.Collections.Generic.List[string]]$List,[string]$Candidate) {
@@ -123,7 +124,8 @@ function Get-PythonCandidates {
         (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python310\python.exe'),
         (Join-Path $env:ProgramFiles 'Python310\python.exe'),
         $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} 'Python310\python.exe' } else { $null }),
-        'C:\Python310\python.exe'
+        'C:\Python310\python.exe',
+        'C:\Python\Python310\python.exe'
     )) {
         Add-PythonCandidate $candidates $candidate
     }
