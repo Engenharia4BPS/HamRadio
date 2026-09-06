@@ -32,14 +32,16 @@ $runtime = Require-Script "ensure-runtime.ps1"
 $planMigration = Require-Script "plan-migration.ps1"
 $applyMigration = Require-Script "apply-migration.ps1"
 $migrateService = Require-Script "migrate-service.ps1"
+$repairCurrent = Require-Script "repair-current.ps1"
 $prepareClean = Require-Script "prepare-clean-install.ps1"
 
 $json = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $detect -InstallRoot $InstallRoot -AsJson
 if ($LASTEXITCODE -ne 0) { throw "Installation detector failed." }
 $state = $json | ConvertFrom-Json
+$currentRepair = ($state.classification -eq "CURRENT" -and $state.recommended_mode -eq "REPAIR")
 
 Write-Host ""
-Write-Host "GADX Vector Setup - Phase D4/D5 Orchestrator" -ForegroundColor Cyan
+Write-Host "GADX Vector Setup - Phase D4-D7 Orchestrator" -ForegroundColor Cyan
 Write-Host "Install root : $InstallRoot"
 Write-Host "Detected     : $($state.classification)"
 Write-Host "Mode         : $($state.recommended_mode)"
@@ -47,7 +49,7 @@ Write-Host ""
 
 switch ($state.recommended_mode) {
     "NONE" {
-        Write-Host "Current installation is healthy. No repair or migration is required." -ForegroundColor Green
+        Write-Host "Current installation is healthy and matches the installer generation. No repair or migration is required." -ForegroundColor Green
         exit 0
     }
     "INSTALL" {
@@ -75,7 +77,7 @@ switch ($state.recommended_mode) {
         Invoke-Step $prepareClean @('-InstallRoot',$InstallRoot,'-Apply')
         Write-Host ""
         Write-Host "Clean-install preparation completed successfully." -ForegroundColor Green
-        Write-Host "Next: review station-specific [radio_keying] and [rig], then run the service transaction."
+        Write-Host "Next: review station-specific [radio_keying] and [rig], then run D6 commissioning."
         exit 0
     }
     "MIGRATE" { }
@@ -89,6 +91,15 @@ if (-not $Apply) {
     Write-Host ""
     Write-Host "Step 1 - runtime/com0com:"
     Invoke-Step $runtime @('-InstallRoot',$InstallRoot)
+
+    if ($currentRepair) {
+        Write-Host ""
+        Write-Host "Step 2 - D7 current installation repair/update:"
+        Invoke-Step $repairCurrent @('-InstallRoot',$InstallRoot)
+        Write-Host ""
+        Write-Host "PREVIEW complete. Re-run with -Apply to execute the detected CURRENT/REPAIR plan." -ForegroundColor Yellow
+        exit 0
+    }
 
     if ($state.migration_required) {
         Write-Host ""
@@ -109,7 +120,21 @@ if (-not $Apply) {
     exit 0
 }
 
-Write-Host "Executing D4 plan..."
+if ($currentRepair) {
+    Write-Host "Executing D7 CURRENT/REPAIR plan..."
+    Write-Host ""
+    Write-Host "[1/2] Ensuring runtime and com0com..."
+    Invoke-Step $runtime @('-InstallRoot',$InstallRoot,'-Apply')
+    Write-Host ""
+    Write-Host "[2/2] Backing up, updating and validating the current installation..."
+    Invoke-Step $repairCurrent @('-InstallRoot',$InstallRoot,'-Apply')
+    Write-Host ""
+    Write-Host "D7 completed successfully." -ForegroundColor Green
+    Write-Host "The current station configuration and virtual COM pairs were preserved."
+    exit 0
+}
+
+Write-Host "Executing migration/repair plan..."
 Write-Host ""
 Write-Host "[1/3] Ensuring runtime and com0com..."
 Invoke-Step $runtime @('-InstallRoot',$InstallRoot,'-Apply')
@@ -128,5 +153,5 @@ Write-Host "[3/3] Deploying current payload and validating service transaction..
 Invoke-Step $migrateService @('-InstallRoot',$InstallRoot,'-Apply')
 
 Write-Host ""
-Write-Host "D4 completed successfully." -ForegroundColor Green
+Write-Host "Migration/repair completed successfully." -ForegroundColor Green
 Write-Host "The machine is now on the current GADX Vector Hub generation."
