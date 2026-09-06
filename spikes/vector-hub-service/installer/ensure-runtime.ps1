@@ -58,6 +58,50 @@ function Test-Runtime {
     }
 }
 
+function Test-Pywin32ServiceHost {
+    if (-not (Test-Path (Join-Path $RuntimeDir "pythonservice.exe") -PathType Leaf)) { return $false }
+    foreach ($name in @("pywintypes310.dll","pythoncom310.dll")) {
+        if (-not (Test-Path (Join-Path $RuntimeDir $name) -PathType Leaf)) { return $false }
+    }
+    return $true
+}
+
+function Ensure-Pywin32ServiceHost {
+    $win32Dir = Join-Path $RuntimeDir "Lib\site-packages\win32"
+    $system32Dir = Join-Path $RuntimeDir "Lib\site-packages\pywin32_system32"
+    $serviceSource = Join-Path $win32Dir "pythonservice.exe"
+    $serviceDestination = Join-Path $RuntimeDir "pythonservice.exe"
+
+    if (-not (Test-Path $serviceSource -PathType Leaf)) {
+        throw "pywin32 service host was not found: $serviceSource"
+    }
+
+    Copy-Item -LiteralPath $serviceSource -Destination $serviceDestination -Force
+
+    foreach ($name in @("pywintypes310.dll","pythoncom310.dll")) {
+        $source = Join-Path $system32Dir $name
+        $destination = Join-Path $RuntimeDir $name
+        if (-not (Test-Path $source -PathType Leaf)) {
+            throw "pywin32 service DLL was not found: $source"
+        }
+        Copy-Item -LiteralPath $source -Destination $destination -Force
+    }
+
+    $oldNoUserSite = $env:PYTHONNOUSERSITE
+    try {
+        $env:PYTHONNOUSERSITE = "1"
+        & $PythonExe -c "import pythoncom, pywintypes, servicemanager, win32serviceutil; print('PYWIN32_SERVICE_HOST_OK')"
+        if ($LASTEXITCODE -ne 0) { throw "Private pywin32 service-host validation failed." }
+    }
+    finally {
+        $env:PYTHONNOUSERSITE = $oldNoUserSite
+    }
+
+    if (-not (Test-Pywin32ServiceHost)) {
+        throw "Private pywin32 service host is incomplete after staging."
+    }
+}
+
 function Get-PythonProbe([string]$Candidate) {
     if (-not $Candidate -or -not (Test-Path $Candidate -PathType Leaf)) { return $null }
     try {
@@ -87,7 +131,6 @@ function Add-PythonCandidate([System.Collections.Generic.List[string]]$List,[str
 function Get-PythonCandidates {
     $candidates = New-Object 'System.Collections.Generic.List[string]'
 
-    # Python launcher is the most reliable way to locate registered 3.10 installs.
     try {
         $py = Get-Command py.exe -ErrorAction SilentlyContinue
         if ($py) {
@@ -96,7 +139,6 @@ function Get-PythonCandidates {
         }
     } catch {}
 
-    # PEP 514 registry locations, both machine-wide and per-user.
     foreach ($registryRoot in @(
         'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Python\PythonCore',
         'Registry::HKEY_CURRENT_USER\SOFTWARE\Python\PythonCore',
@@ -119,7 +161,6 @@ function Get-PythonCandidates {
         }
     }
 
-    # Common install locations not always represented in PATH/registry.
     foreach ($candidate in @(
         (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python310\python.exe'),
         (Join-Path $env:ProgramFiles 'Python310\python.exe'),
@@ -130,14 +171,12 @@ function Get-PythonCandidates {
         Add-PythonCandidate $candidates $candidate
     }
 
-    # An elevated installer may have installed Python under another local profile.
     try {
         foreach ($profile in @(Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue)) {
             Add-PythonCandidate $candidates (Join-Path $profile.FullName 'AppData\Local\Programs\Python\Python310\python.exe')
         }
     } catch {}
 
-    # Finally inspect all python.exe commands visible to this PowerShell process.
     try {
         foreach ($cmd in @(Get-Command python.exe -All -ErrorAction SilentlyContinue)) {
             Add-PythonCandidate $candidates $cmd.Source
@@ -185,7 +224,6 @@ function Initialize-PrivateRuntimeFromExisting([string]$SourcePython) {
         throw "Existing Python copy completed but runtime\python.exe is missing."
     }
 
-    # Do not inherit third-party packages from the machine-wide/user installation.
     $sitePackages = Join-Path $RuntimeDir 'Lib\site-packages'
     if (Test-Path $sitePackages) {
         Get-ChildItem -LiteralPath $sitePackages -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -237,12 +275,14 @@ $pythonInstaller = Get-PythonInstaller
 $com0comInstaller = Find-BundledFile "com0com-installer.exe"
 $com0comSetup = Find-Com0comSetup
 $runtimeOk = Test-Runtime
+$serviceHostOk = if ($runtimeOk) { Test-Pywin32ServiceHost } else { $false }
 $existingCompatiblePython = if (-not $runtimeOk) { Find-CompatiblePython } else { $null }
 
 Write-Host ""
 Write-Host "GADX Vector - Runtime/com0com ensure" -ForegroundColor Cyan
 Write-Host "Install root : $InstallRoot"
 Write-Host "Runtime      : $(if ($runtimeOk) { 'OK' } elseif (Test-Path $PythonExe) { 'INCOMPLETE' } else { 'MISSING' })"
+Write-Host "Service host : $(if ($serviceHostOk) { 'OK' } elseif ($runtimeOk) { 'INCOMPLETE - pywin32 service DLL staging required' } else { 'pending runtime creation' })"
 Write-Host "com0com      : $(if ($com0comSetup) { $com0comSetup } else { 'not installed' })"
 Write-Host "Python setup : $(if ($existingCompatiblePython) { "compatible existing Python: $existingCompatiblePython" } elseif ($pythonInstaller) { $pythonInstaller } else { 'will download official Python 3.10.11 from python.org' })"
 Write-Host "com0com setup: $(if ($com0comInstaller) { $com0comInstaller } else { 'not bundled' })"
@@ -259,6 +299,9 @@ if (-not $Apply) {
             Write-Host "  -> Private Python runtime will be installed/repaired with Tcl/Tk, pip, pyserial and pywin32."
             Write-Host "  -> If the official installer does not create TargetDir, Vector will search all common Windows locations for any compatible Python $PythonSeries x64 + Tcl/Tk and clone it."
         }
+    }
+    if ($runtimeOk -and -not $serviceHostOk) {
+        Write-Host "  -> pywin32 service host will be repaired inside the private runtime (pythonservice.exe + local DLLs)."
     }
     if (-not $com0comSetup) { Write-Host "  -> com0com will be installed if its bundled installer is available." }
     exit 0
@@ -312,9 +355,6 @@ if (-not $runtimeOk) {
         if ($p.ExitCode -ne 0) { throw "Private Python installation/repair failed with exit code $($p.ExitCode)." }
 
         if (-not (Test-Path $PythonExe -PathType Leaf)) {
-            # Some Windows Python installer states may reuse/repair an installation
-            # instead of honoring TargetDir. Search broadly for a compatible 3.10 x64
-            # installation with Tcl/Tk and clone it into Vector's private runtime.
             $fallbackPython = Find-CompatiblePython
             if ($fallbackPython) {
                 Write-Host "Python installer did not create TargetDir; cloning compatible Python into the Vector private runtime..." -ForegroundColor Yellow
@@ -338,21 +378,15 @@ if (-not $runtimeOk) {
     finally {
         $env:PYTHONNOUSERSITE = $oldNoUserSite
     }
-
-    $pythonService = Join-Path $RuntimeDir "pythonservice.exe"
-    if (-not (Test-Path $pythonService -PathType Leaf)) {
-        $postExe = Join-Path $RuntimeDir "Scripts\pywin32_postinstall.exe"
-        $postPy = Join-Path $RuntimeDir "Scripts\pywin32_postinstall.py"
-        if (Test-Path $postExe -PathType Leaf) { & $postExe -install }
-        elseif (Test-Path $postPy -PathType Leaf) { & $PythonExe $postPy -install }
-        else { throw "pywin32 post-install tool was not found." }
-        if ($LASTEXITCODE -ne 0) { throw "pywin32 post-install failed." }
-    }
 }
+
+Write-Host "Staging private pywin32 Windows-service host..."
+Ensure-Pywin32ServiceHost
 
 if (-not (Test-Runtime)) { throw "Private runtime validation failed after install/repair." }
 
 Write-Host ""
 Write-Host "Runtime/com0com ensure completed successfully." -ForegroundColor Green
 Write-Host "Python : $PythonExe"
+Write-Host "Service: $(Join-Path $RuntimeDir 'pythonservice.exe')"
 Write-Host "com0com: $com0comSetup"
