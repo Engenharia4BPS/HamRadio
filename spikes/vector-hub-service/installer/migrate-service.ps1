@@ -66,18 +66,8 @@ $Hub = Join-Path $InstallRoot "app\vector_hub.py"
 $Ts2000 = Join-Path $InstallRoot "app\ts2000.py"
 $ServiceScript = Join-Path $InstallRoot "service\vector_service.py"
 $Config = Join-Path $InstallRoot "config\vector.ini"
-
-if (-not (Test-Path $Python -PathType Leaf)) {
-    throw "Private runtime is missing: $Python"
-}
-if (-not (Test-Path $Config -PathType Leaf)) {
-    throw "Migrated/current vector.ini is missing: $Config"
-}
-
-& $Python -c "import serial, win32serviceutil, servicemanager, tkinter" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    throw "Private runtime validation failed. tkinter, pyserial and pywin32 are required."
-}
+$pythonReady = Test-Path $Python -PathType Leaf
+$configReady = Test-Path $Config -PathType Leaf
 
 $legacy = Get-Service -Name "GADXVectorBridge" -ErrorAction SilentlyContinue
 $current = Get-Service -Name "GADXVectorHub" -ErrorAction SilentlyContinue
@@ -86,8 +76,8 @@ Write-Host ""
 Write-Host "GADX Vector - Service migration" -ForegroundColor Cyan
 Write-Host "Install root : $InstallRoot"
 Write-Host "Payload      : $PayloadRoot"
-Write-Host "Python       : $Python"
-Write-Host "Config       : $Config"
+Write-Host "Python       : $(if ($pythonReady) { $Python } else { 'MISSING - will be supplied by runtime ensure before Apply' })"
+Write-Host "Config       : $(if ($configReady) { $Config } else { 'MISSING - must exist before service transaction' })"
 Write-Host "Legacy svc   : $(if ($legacy) { [string]$legacy.Status } else { 'not installed' })"
 Write-Host "Current svc  : $(if ($current) { [string]$current.Status } else { 'not installed' })"
 Write-Host ""
@@ -106,7 +96,25 @@ if (-not $Apply) {
     Write-Host "  8. If validation succeeds: delete GADXVectorBridge."
     Write-Host ""
     Write-Host "The existing vector.ini and com0com pairs will be preserved."
+    if (-not $pythonReady) {
+        Write-Host "Preview note: private runtime is currently missing; setup-vector will install/repair it before this transaction." -ForegroundColor Yellow
+    }
+    if (-not $configReady) {
+        Write-Host "Preview note: vector.ini is currently missing; migration/repair must create it before this transaction." -ForegroundColor Yellow
+    }
     exit 0
+}
+
+if (-not $pythonReady) {
+    throw "Private runtime is missing: $Python"
+}
+if (-not $configReady) {
+    throw "Migrated/current vector.ini is missing: $Config"
+}
+
+& $Python -c "import serial, win32serviceutil, servicemanager, tkinter" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    throw "Private runtime validation failed. tkinter, pyserial and pywin32 are required."
 }
 
 $legacyWasRunning = ($legacy -and [string]$legacy.Status -eq "Running")
