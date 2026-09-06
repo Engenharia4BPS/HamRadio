@@ -45,7 +45,7 @@ O launcher deve:
 
 O launcher nao deve duplicar a logica de D1-D7.
 
-Artefatos iniciais:
+Artefatos:
 
 ```text
 installer/setup-launcher.ps1
@@ -72,13 +72,36 @@ com0com        OK
 Safety         No changes required
 ```
 
-A GUI mostrou `Healthy installation`, manteve `Apply` desabilitado e refletiu o mesmo estado reportado pelo backend em Preview (`CURRENT / NONE / Payload drift: NO`).
+A GUI mostrou `Healthy installation`, manteve `Apply` desabilitado e refletiu o mesmo estado reportado pelo backend.
 
-**Status: D8B.1 VALIDADA EM CAMPO; fluxo do botao Run Preview ainda em validacao.**
+### Validacao D8B.2 — Preview pela GUI
+
+Data: 2026-09-06
+
+O botao **Run Preview** executou o backend read-only e exibiu na propria janela:
+
+```text
+GADX Vector Setup - D1-D7 Backend Orchestrator
+Release      : 0.8.0-dev.2 / development / D8B
+Install root : C:\Ham\GADX-Vector
+Detected     : CURRENT
+Mode         : NONE
+Payload drift: NO
+
+Current installation is healthy and matches the installer generation. No repair or migration is required.
+```
+
+O rodape mostrou `Preview passed. No Apply is required.` e o botao **Apply permaneceu desabilitado**.
+
+Isso valida a regra central da GUI: Preview e obrigatorio antes de qualquer Apply e uma instalacao `NONE` nunca habilita Apply.
+
+**Status: D8B VALIDADA EM CAMPO para CURRENT saudavel + Preview read-only.**
 
 ---
 
 ## D8C — UX de instalacao / repair / update
+
+**Status: EM IMPLEMENTACAO — release 0.8.0-dev.3.**
 
 Fluxo alvo:
 
@@ -116,6 +139,29 @@ A interface deve distinguir claramente:
 - reboot pendente;
 - falha com rollback seguro;
 - instalacao pronta.
+
+### Primeiro alvo de D8C
+
+Validar o estado visual e o gating de um plano `REPAIR` sem colocar a estacao operacional em risco.
+
+A primeira validacao sera feita em modo de simulacao somente de interface:
+
+```text
+CURRENT + REPAIR
+Payload drift = YES
+Service = Running
+Safety = Hub will be Disabled / Stopped before Apply
+```
+
+Nesse modo:
+
+- a janela deve deixar claro que e SIMULATION / NO CHANGES;
+- o plano de Repair deve ser apresentado como seria numa maquina real;
+- Preview visual pode ser exercitado;
+- Apply deve permanecer fisicamente desabilitado em simulacao;
+- nenhum arquivo, servico, COM ou radio pode ser alterado.
+
+Depois dessa validacao visual, D8C sera testada numa instalacao real que naturalmente esteja em estado REPAIR, reutilizando o backend D7 ja validado.
 
 ---
 
