@@ -15,6 +15,19 @@ function Assert-Administrator {
     }
 }
 
+function Get-ReleaseLabel([string]$InstallerPath) {
+    $releasePath = Join-Path $InstallerPath "release.json"
+    if (-not (Test-Path $releasePath -PathType Leaf)) { return "unversioned" }
+    try {
+        $release = Get-Content -LiteralPath $releasePath -Raw | ConvertFrom-Json
+        $version = if ($release.version) { [string]$release.version } else { "unknown" }
+        $channel = if ($release.channel) { [string]$release.channel } else { "unknown" }
+        $phase = if ($release.phase) { [string]$release.phase } else { "" }
+        return "$version / $channel$(if ($phase) { " / $phase" } else { "" })"
+    }
+    catch { return "invalid release.json" }
+}
+
 Assert-Administrator
 
 $repoZipUrl = "https://github.com/Engenharia4BPS/HamRadio/archive/refs/heads/main.zip"
@@ -54,6 +67,7 @@ try {
     }
 
     Write-Host "Installer refresh: OK" -ForegroundColor Green
+    Write-Host "Release      : $(Get-ReleaseLabel $targetInstaller)"
     Write-Host ""
 
     $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$setup,'-InstallRoot',$InstallRoot)
