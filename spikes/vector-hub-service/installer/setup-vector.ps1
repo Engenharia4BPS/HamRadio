@@ -24,7 +24,9 @@ function Get-ReleaseLabel {
         $version = if ($release.version) { [string]$release.version } else { "unknown" }
         $channel = if ($release.channel) { [string]$release.channel } else { "unknown" }
         $phase = if ($release.phase) { [string]$release.phase } else { "" }
-        return "$version / $channel$(if ($phase) { " / $phase" } else { "" })"
+        $label = "$version / $channel"
+        if ($phase) { $label += " / $phase" }
+        return $label
     }
     catch { return "invalid release.json" }
 }
