@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $InstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)
 $InstallerRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PayloadRoot = Join-Path $InstallerRoot "payload"
+$ReleasePath = Join-Path $InstallerRoot "release.json"
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -14,6 +15,18 @@ function Assert-Administrator {
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw "Run this script from an elevated PowerShell prompt."
     }
+}
+
+function Get-ReleaseLabel {
+    if (-not (Test-Path $ReleasePath -PathType Leaf)) { return "unversioned" }
+    try {
+        $release = Get-Content -LiteralPath $ReleasePath -Raw | ConvertFrom-Json
+        $version = if ($release.version) { [string]$release.version } else { "unknown" }
+        $channel = if ($release.channel) { [string]$release.channel } else { "unknown" }
+        $phase = if ($release.phase) { [string]$release.phase } else { "" }
+        return "$version / $channel$(if ($phase) { " / $phase" } else { "" })"
+    }
+    catch { return "invalid release.json" }
 }
 
 function Require-Script([string]$Name) {
@@ -91,7 +104,8 @@ if ($payloadDrift -and $state.recommended_mode -eq "NONE") {
 $currentRepair = ($state.classification -eq "CURRENT" -and $state.recommended_mode -eq "REPAIR")
 
 Write-Host ""
-Write-Host "GADX Vector Setup - Phase D4-D7 Orchestrator" -ForegroundColor Cyan
+Write-Host "GADX Vector Setup - D1-D7 Backend Orchestrator" -ForegroundColor Cyan
+Write-Host "Release      : $(Get-ReleaseLabel)"
 Write-Host "Install root : $InstallRoot"
 Write-Host "Detected     : $($state.classification)"
 Write-Host "Mode         : $($state.recommended_mode)"
