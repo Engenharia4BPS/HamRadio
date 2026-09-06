@@ -72,11 +72,31 @@ function Ensure-Pywin32ServiceHost {
     $serviceSource = Join-Path $win32Dir "pythonservice.exe"
     $serviceDestination = Join-Path $RuntimeDir "pythonservice.exe"
 
-    if (-not (Test-Path $serviceSource -PathType Leaf)) {
-        throw "pywin32 service host was not found: $serviceSource"
+    if (Test-Path $serviceSource -PathType Leaf) {
+        Copy-Item -LiteralPath $serviceSource -Destination $serviceDestination -Force
     }
+    elseif (Test-Path $serviceDestination -PathType Leaf) {
+        Write-Host "Using existing private pythonservice.exe already staged in runtime."
+    }
+    else {
+        Write-Host "pythonservice.exe is missing; repairing pywin32 package..." -ForegroundColor Yellow
+        $oldNoUserSite = $env:PYTHONNOUSERSITE
+        try {
+            $env:PYTHONNOUSERSITE = "1"
+            & $PythonExe -m pip install --disable-pip-version-check --force-reinstall --no-deps "pywin32==312"
+            if ($LASTEXITCODE -ne 0) { throw "Failed to repair pywin32 package." }
+        }
+        finally {
+            $env:PYTHONNOUSERSITE = $oldNoUserSite
+        }
 
-    Copy-Item -LiteralPath $serviceSource -Destination $serviceDestination -Force
+        if (Test-Path $serviceSource -PathType Leaf) {
+            Copy-Item -LiteralPath $serviceSource -Destination $serviceDestination -Force
+        }
+        elseif (-not (Test-Path $serviceDestination -PathType Leaf)) {
+            throw "pywin32 service host was not found after package repair."
+        }
+    }
 
     foreach ($name in @("pywintypes310.dll","pythoncom310.dll")) {
         $source = Join-Path $system32Dir $name
