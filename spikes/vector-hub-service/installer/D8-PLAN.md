@@ -22,7 +22,9 @@ Entregas:
 - baseline de origem documentado;
 - versao gravada em `config/installed-build.txt` nas operacoes que geram manifesto.
 
-Status inicial: **EM IMPLEMENTACAO**.
+**Status: VALIDADA EM CAMPO em 2026-09-06.**
+
+A validacao confirmou que bootstrap e orquestrador exibem a mesma identidade de release e que uma instalacao CURRENT saudavel chega a `Mode: NONE / Payload drift: NO` sem alteracoes.
 
 ---
 
@@ -42,6 +44,18 @@ O launcher deve:
 - chamar `setup-vector.ps1` como backend.
 
 O launcher nao deve duplicar a logica de D1-D7.
+
+Artefatos iniciais:
+
+```text
+installer/setup-launcher.ps1
+installer/GADX-Vector-Setup.cmd
+setup-vector.ps1 -AsJson
+```
+
+`setup-vector.ps1 -AsJson` e a interface read-only entre o backend validado e a GUI. Ela inclui classificacao, modo recomendado, payload drift e o resultado completo do detector, evitando que o launcher replique as regras do orquestrador.
+
+**Status: EM IMPLEMENTACAO / TESTE.**
 
 ---
 
