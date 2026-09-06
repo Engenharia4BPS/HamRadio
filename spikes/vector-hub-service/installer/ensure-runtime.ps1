@@ -13,6 +13,7 @@ $ThirdPartyCandidates = @(
 )
 $PythonExe = Join-Path $RuntimeDir "python.exe"
 $PythonVersion = "3.10.11"
+$PythonSeries = "3.10"
 $PythonDownloadUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
 $DownloadCache = Join-Path $InstallerRoot "cache"
 $DownloadedPythonInstaller = Join-Path $DownloadCache "python-$PythonVersion-amd64.exe"
@@ -57,14 +58,22 @@ function Test-Runtime {
     }
 }
 
-function Test-CompatiblePython([string]$Candidate) {
-    if (-not $Candidate -or -not (Test-Path $Candidate -PathType Leaf)) { return $false }
+function Get-PythonProbe([string]$Candidate) {
+    if (-not $Candidate -or -not (Test-Path $Candidate -PathType Leaf)) { return $null }
     try {
-        $probe = & $Candidate -c 'import struct,sys,tkinter; print("%d.%d.%d|%d" % (sys.version_info[0],sys.version_info[1],sys.version_info[2],struct.calcsize("P")*8))' 2>$null
-        if ($LASTEXITCODE -ne 0) { return $false }
-        return ([string]$probe).Trim() -eq "$PythonVersion|64"
+        $probe = & $Candidate -c 'import struct,sys,tkinter; print("%d.%d.%d|%d|%s" % (sys.version_info[0],sys.version_info[1],sys.version_info[2],struct.calcsize("P")*8,sys.executable))' 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $probe) { return $null }
+        return ([string]$probe).Trim()
     }
-    catch { return $false }
+    catch { return $null }
+}
+
+function Test-CompatiblePython([string]$Candidate) {
+    $probe = Get-PythonProbe $Candidate
+    if (-not $probe) { return $false }
+    $parts = $probe.Split('|')
+    if ($parts.Count -lt 2) { return $false }
+    return ($parts[0] -like "$PythonSeries.*" -and $parts[1] -eq "64")
 }
 
 function Add-PythonCandidate([System.Collections.Generic.List[string]]$List,[string]$Candidate) {
@@ -74,21 +83,24 @@ function Add-PythonCandidate([System.Collections.Generic.List[string]]$List,[str
     if (-not $List.Contains($Candidate)) { [void]$List.Add($Candidate) }
 }
 
-function Find-CompatiblePython {
+function Get-PythonCandidates {
     $candidates = New-Object 'System.Collections.Generic.List[string]'
 
+    # Python launcher is the most reliable way to locate registered 3.10 installs.
     try {
         $py = Get-Command py.exe -ErrorAction SilentlyContinue
         if ($py) {
             $resolved = & $py.Source -3.10 -c 'import sys; print(sys.executable)' 2>$null
-            if ($LASTEXITCODE -eq 0) { Add-PythonCandidate $candidates ([string]$resolved).Trim() }
+            if ($LASTEXITCODE -eq 0 -and $resolved) { Add-PythonCandidate $candidates ([string]$resolved).Trim() }
         }
     } catch {}
 
+    # PEP 514 registry locations, both machine-wide and per-user.
     foreach ($registryRoot in @(
         'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Python\PythonCore',
         'Registry::HKEY_CURRENT_USER\SOFTWARE\Python\PythonCore',
-        'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Python\PythonCore'
+        'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Python\PythonCore',
+        'Registry::HKEY_CURRENT_USER\SOFTWARE\WOW6432Node\Python\PythonCore'
     )) {
         if (-not (Test-Path $registryRoot)) { continue }
         foreach ($versionKey in @(Get-ChildItem -LiteralPath $registryRoot -ErrorAction SilentlyContinue)) {
@@ -106,21 +118,57 @@ function Find-CompatiblePython {
         }
     }
 
+    # Common install locations not always represented in PATH/registry.
+    foreach ($candidate in @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python310\python.exe'),
+        (Join-Path $env:ProgramFiles 'Python310\python.exe'),
+        $(if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} 'Python310\python.exe' } else { $null }),
+        'C:\Python310\python.exe'
+    )) {
+        Add-PythonCandidate $candidates $candidate
+    }
+
+    # An elevated installer may have installed Python under another local profile.
+    try {
+        foreach ($profile in @(Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue)) {
+            Add-PythonCandidate $candidates (Join-Path $profile.FullName 'AppData\Local\Programs\Python\Python310\python.exe')
+        }
+    } catch {}
+
+    # Finally inspect all python.exe commands visible to this PowerShell process.
     try {
         foreach ($cmd in @(Get-Command python.exe -All -ErrorAction SilentlyContinue)) {
             Add-PythonCandidate $candidates $cmd.Source
         }
     } catch {}
 
-    foreach ($candidate in $candidates) {
+    return $candidates
+}
+
+function Find-CompatiblePython {
+    foreach ($candidate in @(Get-PythonCandidates)) {
         if (Test-CompatiblePython $candidate) { return $candidate }
     }
     return $null
 }
 
+function Show-PythonDiscoveryDiagnostics {
+    $candidates = @(Get-PythonCandidates)
+    if ($candidates.Count -eq 0) {
+        Write-Host "Python discovery: no candidate python.exe paths were found." -ForegroundColor Yellow
+        return
+    }
+    Write-Host "Python discovery candidates:" -ForegroundColor Yellow
+    foreach ($candidate in $candidates) {
+        $probe = Get-PythonProbe $candidate
+        if ($probe) { Write-Host "  + $candidate -> $probe" }
+        else { Write-Host "  - $candidate -> not usable (requires Python 3.10 x64 with Tcl/Tk)" }
+    }
+}
+
 function Initialize-PrivateRuntimeFromExisting([string]$SourcePython) {
     if (-not (Test-CompatiblePython $SourcePython)) {
-        throw "Existing Python candidate is not compatible with the required $PythonVersion x64 + Tcl/Tk runtime: $SourcePython"
+        throw "Existing Python candidate is not compatible with the required Python $PythonSeries x64 + Tcl/Tk runtime: $SourcePython"
     }
 
     $sourceRoot = Split-Path -Parent $SourcePython
@@ -202,12 +250,12 @@ if (-not $Apply) {
     Write-Host "PREVIEW ONLY - no changes were made." -ForegroundColor Yellow
     if (-not $runtimeOk) {
         if ($existingCompatiblePython) {
-            Write-Host "  -> A compatible Python $PythonVersion x64 installation already exists on this machine."
+            Write-Host "  -> A compatible Python $PythonSeries x64 installation with Tcl/Tk already exists on this machine."
             Write-Host "  -> It will be copied into the private Vector runtime without altering the existing installation."
         } else {
             if (-not $pythonInstaller) { Write-Host "  -> Official Python $PythonVersion installer will be downloaded from python.org." }
             Write-Host "  -> Private Python runtime will be installed/repaired with Tcl/Tk, pip, pyserial and pywin32."
-            Write-Host "  -> If the official installer reuses an existing same-version installation instead of TargetDir, Vector will clone that compatible runtime automatically."
+            Write-Host "  -> If the official installer does not create TargetDir, Vector will search all common Windows locations for any compatible Python $PythonSeries x64 + Tcl/Tk and clone it."
         }
     }
     if (-not $com0comSetup) { Write-Host "  -> com0com will be installed if its bundled installer is available." }
@@ -262,18 +310,19 @@ if (-not $runtimeOk) {
         if ($p.ExitCode -ne 0) { throw "Private Python installation/repair failed with exit code $($p.ExitCode)." }
 
         if (-not (Test-Path $PythonExe -PathType Leaf)) {
-            # CPython's traditional Windows installer intentionally reuses an existing
-            # installation of the same version and may ignore TargetDir. In that case,
-            # clone the now-compatible installation into Vector's private runtime.
+            # Some Windows Python installer states may reuse/repair an installation
+            # instead of honoring TargetDir. Search broadly for a compatible 3.10 x64
+            # installation with Tcl/Tk and clone it into Vector's private runtime.
             $fallbackPython = Find-CompatiblePython
             if ($fallbackPython) {
-                Write-Host "Python installer reused an existing machine installation; cloning it into the Vector private runtime..." -ForegroundColor Yellow
+                Write-Host "Python installer did not create TargetDir; cloning compatible Python into the Vector private runtime..." -ForegroundColor Yellow
                 Initialize-PrivateRuntimeFromExisting $fallbackPython
             }
         }
 
         if (-not (Test-Path $PythonExe -PathType Leaf)) {
-            throw "Python installer finished but runtime\python.exe is missing and no compatible Python $PythonVersion x64 installation could be cloned."
+            Show-PythonDiscoveryDiagnostics
+            throw "Python installer finished but runtime\python.exe is missing and no compatible Python $PythonSeries x64 + Tcl/Tk installation could be cloned."
         }
     }
 
