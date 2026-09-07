@@ -86,10 +86,11 @@ Result: **D8E.1 PRODUCT PORT MANAGER ENTRY POINT VALIDATED IN FIELD.**
 
 ## D8E.2 - Port Manager button inside GADX Vector Setup
 
-Status: **IN FIELD VALIDATION**
-Release: `0.8.0-dev.15 / development / D8E`
+Status: **VALIDATED IN FIELD**
+Release tested: `0.8.0-dev.15 / development / D8E`
+Date: 2026-09-07
 
-The main `setup-launcher.ps1` now includes a `Port Manager` button.
+The main `setup-launcher.ps1` includes a `Port Manager` button.
 
 Behavior:
 
@@ -100,12 +101,27 @@ Behavior:
 - the existing D1-D7 backend and Apply safety rules are unchanged;
 - no COM/config change occurs merely by opening Port Manager; changes still require explicit confirmation inside the tool.
 
-Field acceptance:
+Field validation confirmed:
 
-1. `GADX Vector Setup` opens normally on Windows PowerShell 5.1.
-2. Release shows `0.8.0-dev.15 / development / D8E`.
-3. Healthy installation remains `CURRENT / NONE / Payload drift NO`.
-4. `Port Manager` button is enabled.
-5. Clicking `Port Manager` opens the already validated Port Manager GUI.
-6. `Apply` remains disabled for the healthy `NONE` state.
-7. Closing Port Manager does not affect the Hub/service/COM configuration.
+```text
+Release        0.8.0-dev.15 / development / D8E
+Detected       CURRENT
+Recommended    NONE
+Payload drift  NO
+Service        Running
+Runtime        OK
+com0com        OK
+Safety         No changes required
+```
+
+The `Port Manager` button was enabled, clicking it opened the already validated Port Manager GUI in a separate window, and the main Setup `Apply` button remained disabled for the healthy `NONE` state.
+
+No COM/config change was requested during the integration validation.
+
+Result: **D8E.2 MAIN SETUP PORT MANAGER INTEGRATION VALIDATED IN FIELD.**
+
+---
+
+## D8E result
+
+D8E is considered **VALIDATED IN FIELD** for the current baseline. The operator now has a product-level Port Manager entry point both standalone and directly from the main GADX Vector Setup GUI, without needing to invoke the Python tool manually.
