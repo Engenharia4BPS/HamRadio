@@ -35,6 +35,15 @@ function Test-LockedFile([string]$Path,$Artifact) {
     return ($actual -eq $expected)
 }
 
+function Get-FileFingerprint([string]$Path) {
+    if (-not (Test-Path $Path -PathType Leaf)) { return $null }
+    $file = Get-Item -LiteralPath $Path
+    return [pscustomobject]@{
+        size = [int64]$file.Length
+        sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+    }
+}
+
 function Find-Com0comSetup {
     foreach ($candidate in @(
         "C:\Ham\com0com\setupc.exe",
@@ -52,6 +61,7 @@ Write-Host ""
 Write-Host "GADX Vector - com0com dependency-lock verification" -ForegroundColor Cyan
 Write-Host "Version      : $([string]$c.version)"
 Write-Host "Distribution : $([string]$c.filename)"
+Write-Host "URL          : $([string]$c.url)"
 Write-Host "SHA256       : $([string]$c.sha256)"
 Write-Host "Mode         : $(if ($Online) { 'INSTALLED + ONLINE DISTRIBUTION' } else { 'INSTALLED FILES ONLY' })"
 Write-Host ""
@@ -84,9 +94,17 @@ try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
     Write-Host "Downloading locked com0com distribution..."
-    Invoke-WebRequest -UseBasicParsing -Uri ([string]$c.url) -OutFile $target
+    $headers = @{ 'User-Agent' = 'GADX-Vector-Installer/0.8' }
+    Invoke-WebRequest -UseBasicParsing -Uri ([string]$c.url) -Headers $headers -OutFile $target
 
     if (-not (Test-LockedFile $target $c)) {
+        $actual = Get-FileFingerprint $target
+        if ($actual) {
+            Write-Host "Downloaded size   : $($actual.size)" -ForegroundColor Yellow
+            Write-Host "Downloaded SHA256 : $($actual.sha256)" -ForegroundColor Yellow
+            Write-Host "Expected size     : $([int64]$c.size)" -ForegroundColor Yellow
+            Write-Host "Expected SHA256   : $([string]$c.sha256)" -ForegroundColor Yellow
+        }
         throw "Downloaded com0com distribution failed size/SHA256 validation."
     }
 
