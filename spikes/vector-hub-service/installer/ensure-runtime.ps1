@@ -50,6 +50,20 @@ foreach ($pkg in @($DependencyLock.python_packages)) {
 if (-not $PySerialVersion) { throw "dependency-lock.json does not contain pyserial." }
 if (-not $PyWin32Version) { throw "dependency-lock.json does not contain pywin32." }
 
+$Com0comArtifact = $DependencyLock.com0com
+if (-not $Com0comArtifact -or -not [bool]$Com0comArtifact.pinned_distribution) {
+    throw "dependency-lock.json does not contain a pinned com0com distribution."
+}
+foreach ($field in @('version','filename','url','size','sha256','required_executable')) {
+    if (-not $Com0comArtifact.$field) { throw "com0com dependency lock is missing required field '$field'." }
+}
+if ([string]$Com0comArtifact.url -notmatch '^https://') { throw "com0com dependency lock URL must use HTTPS." }
+if ([string]$Com0comArtifact.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw "com0com dependency lock SHA256 is invalid." }
+if ([int64]$Com0comArtifact.size -le 0) { throw "com0com dependency lock size is invalid." }
+if (@($Com0comArtifact.installed_files).Count -eq 0) { throw "com0com dependency lock does not contain installed file fingerprints." }
+$Com0comVersion = [string]$Com0comArtifact.version
+$DownloadedCom0comInstaller = Join-Path $DownloadCache ([string]$Com0comArtifact.filename)
+
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -84,6 +98,62 @@ function Test-LockedArtifactFile([string]$Path,$Artifact) {
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
     $expected = ([string]$Artifact.sha256).ToLowerInvariant()
     return ($actual -eq $expected)
+}
+
+function Test-Com0comInstalledLock([string]$SetupPath) {
+    if (-not $SetupPath -or -not (Test-Path $SetupPath -PathType Leaf)) { return $false }
+    $installDir = Split-Path -Parent $SetupPath
+    foreach ($entry in @($Com0comArtifact.installed_files)) {
+        foreach ($field in @('name','size','sha256')) {
+            if (-not $entry.$field) { throw "com0com installed file lock is missing required field '$field'." }
+        }
+        $candidate = Join-Path $installDir ([string]$entry.name)
+        if (-not (Test-LockedArtifactFile $candidate $entry)) { return $false }
+    }
+    return $true
+}
+
+function Get-Com0comInstaller([switch]$Download) {
+    $bundled = Find-BundledFile ([string]$Com0comArtifact.filename)
+    if (-not $bundled) { $bundled = Find-BundledFile "com0com-installer.exe" }
+    if ($bundled) {
+        if (-not (Test-LockedArtifactFile $bundled $Com0comArtifact)) {
+            throw "Bundled com0com installer does not match dependency-lock.json size/SHA256."
+        }
+        return $bundled
+    }
+
+    if (Test-Path $DownloadedCom0comInstaller -PathType Leaf) {
+        if (Test-LockedArtifactFile $DownloadedCom0comInstaller $Com0comArtifact) {
+            return $DownloadedCom0comInstaller
+        }
+        if (-not $Download) { return $null }
+        Write-Host "Cached com0com installer failed dependency lock validation; removing it." -ForegroundColor Yellow
+        Remove-Item -LiteralPath $DownloadedCom0comInstaller -Force
+    }
+
+    if (-not $Download) { return $null }
+
+    New-Item -ItemType Directory -Force -Path $DownloadCache | Out-Null
+    Write-Host "Downloading locked com0com $Com0comVersion distribution..."
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -UseBasicParsing -Uri ([string]$Com0comArtifact.url) -OutFile $DownloadedCom0comInstaller
+    }
+    catch {
+        if (Test-Path $DownloadedCom0comInstaller) { Remove-Item -LiteralPath $DownloadedCom0comInstaller -Force -ErrorAction SilentlyContinue }
+        throw "Unable to download locked com0com $Com0comVersion. $($_.Exception.Message)"
+    }
+
+    if (-not (Test-LockedArtifactFile $DownloadedCom0comInstaller $Com0comArtifact)) {
+        $actualSize = if (Test-Path $DownloadedCom0comInstaller -PathType Leaf) { (Get-Item -LiteralPath $DownloadedCom0comInstaller).Length } else { 0 }
+        $actualHash = if (Test-Path $DownloadedCom0comInstaller -PathType Leaf) { (Get-FileHash -Algorithm SHA256 -LiteralPath $DownloadedCom0comInstaller).Hash.ToLowerInvariant() } else { "missing" }
+        if (Test-Path $DownloadedCom0comInstaller) { Remove-Item -LiteralPath $DownloadedCom0comInstaller -Force -ErrorAction SilentlyContinue }
+        throw "com0com installer failed dependency-lock validation after download. expectedSize=$([int64]$Com0comArtifact.size) actualSize=$actualSize expectedSha=$([string]$Com0comArtifact.sha256) actualSha=$actualHash"
+    }
+
+    Write-Host "Locked com0com installer verified: size + SHA256"
+    return $DownloadedCom0comInstaller
 }
 
 function Test-Runtime {
@@ -352,8 +422,9 @@ function Get-PythonInstaller([switch]$Download) {
 
 Assert-Administrator
 $pythonInstaller = Get-PythonInstaller
-$com0comInstaller = Find-BundledFile "com0com-installer.exe"
 $com0comSetup = Find-Com0comSetup
+$com0comInstalledLocked = if ($com0comSetup) { Test-Com0comInstalledLock $com0comSetup } else { $false }
+$com0comInstaller = if (-not $com0comInstalledLocked) { Get-Com0comInstaller } else { $null }
 $runtimeOk = Test-Runtime
 $serviceHostOk = if ($runtimeOk) { Test-Pywin32ServiceHost } else { $false }
 $existingCompatiblePython = if (-not $runtimeOk) { Find-CompatiblePython } else { $null }
@@ -361,12 +432,12 @@ $existingCompatiblePython = if (-not $runtimeOk) { Find-CompatiblePython } else 
 Write-Host ""
 Write-Host "GADX Vector - Runtime/com0com ensure" -ForegroundColor Cyan
 Write-Host "Install root : $InstallRoot"
-Write-Host "Dependency lock: Python $PythonVersion / pyserial $PySerialVersion / pywin32 $PyWin32Version"
+Write-Host "Dependency lock: Python $PythonVersion / pyserial $PySerialVersion / pywin32 $PyWin32Version / com0com $Com0comVersion"
 Write-Host "Runtime      : $(if ($runtimeOk) { 'OK - locked versions' } elseif (Test-Path $PythonExe) { 'INCOMPLETE OR VERSION DRIFT' } else { 'MISSING' })"
 Write-Host "Service host : $(if ($serviceHostOk) { 'OK' } elseif ($runtimeOk) { 'INCOMPLETE - pywin32 service DLL staging required' } else { 'pending runtime creation' })"
-Write-Host "com0com      : $(if ($com0comSetup) { $com0comSetup } else { 'not installed' })"
+Write-Host "com0com      : $(if ($com0comInstalledLocked) { "OK - locked $Com0comVersion ($com0comSetup)" } elseif ($com0comSetup) { "VERSION/HASH DRIFT ($com0comSetup)" } else { 'MISSING' })"
 Write-Host "Python setup : $(if ($existingCompatiblePython) { "locked-version existing Python: $existingCompatiblePython" } elseif ($pythonInstaller) { "$pythonInstaller (verified by dependency lock)" } else { "will download locked Python $PythonVersion from python.org and verify SHA256" })"
-Write-Host "com0com setup: $(if ($com0comInstaller) { $com0comInstaller } else { 'not bundled' })"
+Write-Host "com0com setup: $(if ($com0comInstalledLocked) { 'not required - installed files match dependency lock' } elseif ($com0comInstaller) { "$com0comInstaller (verified by dependency lock)" } elseif (-not $com0comSetup) { "will download locked $([string]$Com0comArtifact.filename) and verify SHA256" } else { 'blocked - installed com0com does not match dependency lock' })"
 Write-Host ""
 
 if (-not $Apply) {
@@ -384,20 +455,32 @@ if (-not $Apply) {
     if ($runtimeOk -and -not $serviceHostOk) {
         Write-Host "  -> pywin32 service host will be repaired from the verified locked pywin32 wheel."
     }
-    if (-not $com0comSetup) { Write-Host "  -> com0com will be installed if its bundled installer is available." }
+    if ($com0comSetup -and -not $com0comInstalledLocked) {
+        Write-Host "  -> Existing com0com does not match the dependency lock and will NOT be replaced automatically." -ForegroundColor Yellow
+        Write-Host "  -> Repair requires an explicit controlled com0com migration path."
+    }
+    elseif (-not $com0comSetup) {
+        Write-Host "  -> Locked com0com $Com0comVersion will be downloaded, size/SHA256 verified, then installed without default COM pairs."
+    }
+    if ($com0comInstalledLocked) { Write-Host "COM0COM_DEPENDENCY_LOCK_OK" -ForegroundColor Green }
     exit 0
 }
 
+if ($com0comSetup -and -not $com0comInstalledLocked) {
+    throw "Existing com0com installation does not match dependency-lock.json. Automatic replacement is intentionally blocked."
+}
+
 if (-not $com0comSetup) {
-    if (-not $com0comInstaller) { throw "com0com is missing and bundled com0com-installer.exe was not found." }
-    Write-Host "Installing com0com..."
+    $com0comInstaller = Get-Com0comInstaller -Download
+    if (-not $com0comInstaller) { throw "Locked com0com installer could not be acquired." }
+    Write-Host "Installing locked com0com $Com0comVersion..."
     $old1 = $env:CNC_INSTALL_CNCA0_CNCB0_PORTS
     $old2 = $env:CNC_INSTALL_COMX_COMX_PORTS
     try {
         $env:CNC_INSTALL_CNCA0_CNCB0_PORTS = "NO"
         $env:CNC_INSTALL_COMX_COMX_PORTS = "NO"
         $p = Start-Process -FilePath $com0comInstaller -ArgumentList @('/S') -Wait -PassThru
-        if ($p.ExitCode -ne 0) { throw "com0com installer failed with exit code $($p.ExitCode)." }
+        if ($p.ExitCode -ne 0) { throw "Locked com0com installer failed with exit code $($p.ExitCode)." }
     }
     finally {
         $env:CNC_INSTALL_CNCA0_CNCB0_PORTS = $old1
@@ -406,6 +489,10 @@ if (-not $com0comSetup) {
     Start-Sleep -Seconds 2
     $com0comSetup = Find-Com0comSetup
     if (-not $com0comSetup) { throw "com0com installation completed but setupc.exe was not found." }
+    if (-not (Test-Com0comInstalledLock $com0comSetup)) {
+        throw "Installed com0com files do not match dependency-lock.json after installation."
+    }
+    $com0comInstalledLocked = $true
 }
 
 if (-not $runtimeOk) {
@@ -464,6 +551,9 @@ Write-Host "Staging private pywin32 Windows-service host..."
 Ensure-Pywin32ServiceHost
 
 if (-not (Test-Runtime)) { throw "Private runtime validation failed after locked install/repair." }
+if (-not $com0comSetup -or -not (Test-Com0comInstalledLock $com0comSetup)) {
+    throw "com0com validation failed after locked install/repair."
+}
 
 Write-Host ""
 Write-Host "Runtime/com0com ensure completed successfully." -ForegroundColor Green
@@ -471,3 +561,4 @@ Write-Host "Python : $PythonExe"
 Write-Host "Service: $(Join-Path $RuntimeDir 'pythonservice.exe')"
 Write-Host "com0com: $com0comSetup"
 Write-Host "RUNTIME_DEPENDENCY_LOCK_OK" -ForegroundColor Green
+Write-Host "COM0COM_DEPENDENCY_LOCK_OK" -ForegroundColor Green
