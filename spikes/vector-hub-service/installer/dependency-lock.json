@@ -31,9 +31,43 @@
     }
   ],
   "com0com": {
-    "mode": "installed-or-bundled",
+    "mode": "installed-or-locked-download",
     "required_executable": "setupc.exe",
-    "pinned_distribution": false,
-    "note": "D8D.3A locks Python and Python wheels first. com0com distribution/hash pinning remains a separate D8D.3B task because redistribution/source policy must be finalized."
+    "pinned_distribution": true,
+    "version": "3.0.0.0",
+    "architecture": "x64",
+    "filename": "Setup_com0com_v3.0.0.0_W7_x64_signed.exe",
+    "url": "https://sourceforge.net/projects/signed-drivers/files/com0com/v3.0/Setup_com0com_v3.0.0.0_W7_x64_signed.exe/download",
+    "size": 261544,
+    "sha256": "26486b28604b49a9008c54feb11b9ece0008a8287ee5caf0bcf2a62f4317128f",
+    "signer": "CyberCircuits",
+    "installed_files": [
+      {
+        "name": "com0com.sys",
+        "size": 90544,
+        "sha256": "3ea9374e0da84ac3baba16cfd1b2cb8e1b7c18e8495ad6757e16010a85ea6c2e"
+      },
+      {
+        "name": "setup.dll",
+        "size": 73136,
+        "sha256": "eaf2da64a93bb65bf27f8c1bcf4d5dd7f0aaaea4e64373dac248146e2912ac02"
+      },
+      {
+        "name": "setupc.exe",
+        "size": 17328,
+        "sha256": "cf007dd1154b1b0e1190dad7840b448d1cfae2abbdd2a80cb8ee3c700cfd42d3"
+      },
+      {
+        "name": "setupg.exe",
+        "size": 160176,
+        "sha256": "34facf876f11d1064e55a158c17057860a6a46ffbdd6375879df87687f99f684"
+      },
+      {
+        "name": "uninstall.exe",
+        "size": 66650,
+        "sha256": "06005aae7596e07d2dfb11d06705acad59f39979833ea27e920638916a513c81"
+      }
+    ],
+    "compatibility_note": "The selected 2017 signed package is the field-validated GADX Vector baseline. Windows 10/11 Secure Boot and modern kernel-driver signing compatibility must still be exercised in the D8G release-candidate matrix; do not infer Secure Boot compatibility from Authenticode file signatures alone."
   }
 }
