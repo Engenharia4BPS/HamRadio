@@ -161,6 +161,36 @@ Nesse modo:
 - Apply deve permanecer fisicamente desabilitado em simulacao;
 - nenhum arquivo, servico, COM ou radio pode ser alterado.
 
+### Validacao D8C.1 — abertura segura da simulacao REPAIR
+
+Data: 2026-09-06
+
+A simulacao isolada abriu corretamente usando:
+
+```text
+installer/setup-repair-simulation.ps1
+installer/D8C-Repair-Simulation.cmd
+```
+
+A janela exibiu:
+
+```text
+Release        0.8.0-dev.3 / development / D8C
+Detected       CURRENT
+Recommended    REPAIR
+Payload drift  YES
+Service        Running
+Runtime        OK
+com0com        OK
+Safety         SIMULATION - real Hub untouched
+```
+
+O botao `Apply REPAIR` permaneceu desabilitado e a estacao operacional continuou em `CURRENT / NONE / Payload drift: NO` no backend real.
+
+Durante a implementacao foi encontrado um problema de encoding no Windows PowerShell 5.1 causado por caracteres Unicode em `setup-launcher.ps1`. Para nao arriscar regressao no launcher D8B ja validado, a simulacao D8C foi isolada em um script ASCII-only e o launcher de producao foi restaurado ao baseline validado.
+
+**Status: D8C.1 VALIDADA EM CAMPO. Proximo passo: validar Run Preview dentro da simulacao REPAIR.**
+
 Depois dessa validacao visual, D8C sera testada numa instalacao real que naturalmente esteja em estado REPAIR, reutilizando o backend D7 ja validado.
 
 ---
