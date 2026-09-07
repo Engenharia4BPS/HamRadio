@@ -12,11 +12,43 @@ $ThirdPartyCandidates = @(
     (Join-Path $InstallerRoot "thirdparty")
 )
 $PythonExe = Join-Path $RuntimeDir "python.exe"
-$PythonVersion = "3.10.11"
-$PythonSeries = "3.10"
-$PythonDownloadUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
+$DependencyLockPath = Join-Path $InstallerRoot "dependency-lock.json"
+$LockedPackageInstaller = Join-Path $InstallerRoot "install-locked-python-packages.ps1"
 $DownloadCache = Join-Path $InstallerRoot "cache"
-$DownloadedPythonInstaller = Join-Path $DownloadCache "python-$PythonVersion-amd64.exe"
+
+if (-not (Test-Path $DependencyLockPath -PathType Leaf)) {
+    throw "dependency-lock.json was not found: $DependencyLockPath"
+}
+if (-not (Test-Path $LockedPackageInstaller -PathType Leaf)) {
+    throw "Locked Python package installer was not found: $LockedPackageInstaller"
+}
+
+$DependencyLock = Get-Content -LiteralPath $DependencyLockPath -Raw | ConvertFrom-Json
+if ([int]$DependencyLock.format -ne 1) { throw "Unsupported dependency-lock format." }
+
+$PythonArtifact = $DependencyLock.python
+foreach ($field in @('version','filename','url','size','sha256')) {
+    if (-not $PythonArtifact.$field) { throw "Python dependency lock is missing required field '$field'." }
+}
+if ([string]$PythonArtifact.url -notmatch '^https://') { throw "Python dependency lock URL must use HTTPS." }
+if ([string]$PythonArtifact.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw "Python dependency lock SHA256 is invalid." }
+if ([int64]$PythonArtifact.size -le 0) { throw "Python dependency lock size is invalid." }
+
+$PythonVersion = [string]$PythonArtifact.version
+$pythonParts = $PythonVersion.Split('.')
+if ($pythonParts.Count -lt 2) { throw "Python dependency lock version is invalid: $PythonVersion" }
+$PythonSeries = "$($pythonParts[0]).$($pythonParts[1])"
+$PythonDownloadUrl = [string]$PythonArtifact.url
+$DownloadedPythonInstaller = Join-Path $DownloadCache ([string]$PythonArtifact.filename)
+
+$PySerialVersion = $null
+$PyWin32Version = $null
+foreach ($pkg in @($DependencyLock.python_packages)) {
+    if ([string]$pkg.name -eq 'pyserial') { $PySerialVersion = [string]$pkg.version }
+    if ([string]$pkg.name -eq 'pywin32') { $PyWin32Version = [string]$pkg.version }
+}
+if (-not $PySerialVersion) { throw "dependency-lock.json does not contain pyserial." }
+if (-not $PyWin32Version) { throw "dependency-lock.json does not contain pywin32." }
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -45,12 +77,22 @@ function Find-Com0comSetup {
     return $null
 }
 
+function Test-LockedArtifactFile([string]$Path,$Artifact) {
+    if (-not (Test-Path $Path -PathType Leaf)) { return $false }
+    $file = Get-Item -LiteralPath $Path
+    if ([int64]$file.Length -ne [int64]$Artifact.size) { return $false }
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+    $expected = ([string]$Artifact.sha256).ToLowerInvariant()
+    return ($actual -eq $expected)
+}
+
 function Test-Runtime {
     if (-not (Test-Path $PythonExe -PathType Leaf)) { return $false }
     $oldNoUserSite = $env:PYTHONNOUSERSITE
     try {
         $env:PYTHONNOUSERSITE = "1"
-        & $PythonExe -c "import tkinter, serial, win32serviceutil, servicemanager" *> $null
+        $code = "import platform,tkinter,serial,win32serviceutil,servicemanager; from importlib.metadata import version; raise SystemExit(0 if platform.python_version() == '$PythonVersion' and version('pyserial') == '$PySerialVersion' and version('pywin32') == '$PyWin32Version' else 1)"
+        & $PythonExe -c $code *> $null
         return ($LASTEXITCODE -eq 0)
     }
     finally {
@@ -79,12 +121,11 @@ function Ensure-Pywin32ServiceHost {
         Write-Host "Using existing private pythonservice.exe already staged in runtime."
     }
     else {
-        Write-Host "pythonservice.exe is missing; repairing pywin32 package..." -ForegroundColor Yellow
+        Write-Host "pythonservice.exe is missing; repairing pywin32 from locked wheel..." -ForegroundColor Yellow
         $oldNoUserSite = $env:PYTHONNOUSERSITE
         try {
             $env:PYTHONNOUSERSITE = "1"
-            & $PythonExe -m pip install --disable-pip-version-check --force-reinstall --no-deps "pywin32==312"
-            if ($LASTEXITCODE -ne 0) { throw "Failed to repair pywin32 package." }
+            & $LockedPackageInstaller -PythonExe $PythonExe -Package "pywin32" -ForceReinstall
         }
         finally {
             $env:PYTHONNOUSERSITE = $oldNoUserSite
@@ -94,7 +135,7 @@ function Ensure-Pywin32ServiceHost {
             Copy-Item -LiteralPath $serviceSource -Destination $serviceDestination -Force
         }
         elseif (-not (Test-Path $serviceDestination -PathType Leaf)) {
-            throw "pywin32 service host was not found after package repair."
+            throw "pywin32 service host was not found after locked package repair."
         }
     }
 
@@ -135,7 +176,8 @@ function Get-PythonProbe([string]$Candidate) {
 function Test-CompatiblePython([string]$Candidate) {
     if (-not $Candidate -or -not (Test-Path $Candidate -PathType Leaf)) { return $false }
     try {
-        & $Candidate -c "import struct,sys,tkinter; raise SystemExit(0 if sys.version_info[:2] == (3,10) and struct.calcsize('P')*8 == 64 else 1)" 2>$null
+        $versionTuple = ($PythonVersion.Split('.') | ForEach-Object { [int]$_ }) -join ','
+        & $Candidate -c "import struct,sys,tkinter; raise SystemExit(0 if sys.version_info[:3] == ($versionTuple) and struct.calcsize('P')*8 == 64 else 1)" 2>$null
         return ($LASTEXITCODE -eq 0)
     }
     catch { return $false }
@@ -223,19 +265,19 @@ function Show-PythonDiscoveryDiagnostics {
     foreach ($candidate in $candidates) {
         $probe = Get-PythonProbe $candidate
         if ($probe) { Write-Host "  + $candidate -> $probe" }
-        else { Write-Host "  - $candidate -> not usable (requires Python 3.10 x64 with Tcl/Tk)" }
+        else { Write-Host "  - $candidate -> not usable (requires locked Python $PythonVersion x64 with Tcl/Tk)" }
     }
 }
 
 function Initialize-PrivateRuntimeFromExisting([string]$SourcePython) {
     if (-not (Test-CompatiblePython $SourcePython)) {
-        throw "Existing Python candidate is not compatible with the required Python $PythonSeries x64 + Tcl/Tk runtime: $SourcePython"
+        throw "Existing Python candidate is not compatible with the locked Python $PythonVersion x64 + Tcl/Tk runtime: $SourcePython"
     }
 
     $sourceRoot = Split-Path -Parent $SourcePython
     if ([System.IO.Path]::GetFullPath($sourceRoot) -ieq [System.IO.Path]::GetFullPath($RuntimeDir)) { return }
 
-    Write-Host "Creating isolated Vector runtime from existing compatible Python: $SourcePython"
+    Write-Host "Creating isolated Vector runtime from existing locked-version Python: $SourcePython"
     if (Test-Path $RuntimeDir) { Remove-Item -LiteralPath $RuntimeDir -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
     Copy-Item -Path (Join-Path $sourceRoot '*') -Destination $RuntimeDir -Recurse -Force
@@ -270,23 +312,41 @@ function Initialize-PrivateRuntimeFromExisting([string]$SourcePython) {
 
 function Get-PythonInstaller([switch]$Download) {
     $bundled = Find-BundledFile "python-installer.exe"
-    if ($bundled) { return $bundled }
-    if (Test-Path $DownloadedPythonInstaller -PathType Leaf) { return $DownloadedPythonInstaller }
+    if ($bundled) {
+        if (-not (Test-LockedArtifactFile $bundled $PythonArtifact)) {
+            throw "Bundled python-installer.exe does not match dependency-lock.json size/SHA256."
+        }
+        return $bundled
+    }
+
+    if (Test-Path $DownloadedPythonInstaller -PathType Leaf) {
+        if (Test-LockedArtifactFile $DownloadedPythonInstaller $PythonArtifact) {
+            return $DownloadedPythonInstaller
+        }
+        if (-not $Download) { return $null }
+        Write-Host "Cached Python installer failed dependency lock validation; removing it." -ForegroundColor Yellow
+        Remove-Item -LiteralPath $DownloadedPythonInstaller -Force
+    }
+
     if (-not $Download) { return $null }
 
     New-Item -ItemType Directory -Force -Path $DownloadCache | Out-Null
-    Write-Host "Downloading official Python $PythonVersion installer from python.org..."
+    Write-Host "Downloading locked Python $PythonVersion installer from python.org..."
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -UseBasicParsing -Uri $PythonDownloadUrl -OutFile $DownloadedPythonInstaller
     }
     catch {
         if (Test-Path $DownloadedPythonInstaller) { Remove-Item -Force $DownloadedPythonInstaller -ErrorAction SilentlyContinue }
-        throw "Unable to download Python $PythonVersion from python.org. $($_.Exception.Message)"
+        throw "Unable to download locked Python $PythonVersion from python.org. $($_.Exception.Message)"
     }
-    if (-not (Test-Path $DownloadedPythonInstaller -PathType Leaf)) {
-        throw "Python download finished but installer file was not created."
+
+    if (-not (Test-LockedArtifactFile $DownloadedPythonInstaller $PythonArtifact)) {
+        if (Test-Path $DownloadedPythonInstaller) { Remove-Item -Force $DownloadedPythonInstaller -ErrorAction SilentlyContinue }
+        throw "Python installer failed dependency-lock size/SHA256 validation after download."
     }
+
+    Write-Host "Locked Python installer verified: size + SHA256"
     return $DownloadedPythonInstaller
 }
 
@@ -301,10 +361,11 @@ $existingCompatiblePython = if (-not $runtimeOk) { Find-CompatiblePython } else 
 Write-Host ""
 Write-Host "GADX Vector - Runtime/com0com ensure" -ForegroundColor Cyan
 Write-Host "Install root : $InstallRoot"
-Write-Host "Runtime      : $(if ($runtimeOk) { 'OK' } elseif (Test-Path $PythonExe) { 'INCOMPLETE' } else { 'MISSING' })"
+Write-Host "Dependency lock: Python $PythonVersion / pyserial $PySerialVersion / pywin32 $PyWin32Version"
+Write-Host "Runtime      : $(if ($runtimeOk) { 'OK - locked versions' } elseif (Test-Path $PythonExe) { 'INCOMPLETE OR VERSION DRIFT' } else { 'MISSING' })"
 Write-Host "Service host : $(if ($serviceHostOk) { 'OK' } elseif ($runtimeOk) { 'INCOMPLETE - pywin32 service DLL staging required' } else { 'pending runtime creation' })"
 Write-Host "com0com      : $(if ($com0comSetup) { $com0comSetup } else { 'not installed' })"
-Write-Host "Python setup : $(if ($existingCompatiblePython) { "compatible existing Python: $existingCompatiblePython" } elseif ($pythonInstaller) { $pythonInstaller } else { 'will download official Python 3.10.11 from python.org' })"
+Write-Host "Python setup : $(if ($existingCompatiblePython) { "locked-version existing Python: $existingCompatiblePython" } elseif ($pythonInstaller) { "$pythonInstaller (verified by dependency lock)" } else { "will download locked Python $PythonVersion from python.org and verify SHA256" })"
 Write-Host "com0com setup: $(if ($com0comInstaller) { $com0comInstaller } else { 'not bundled' })"
 Write-Host ""
 
@@ -312,16 +373,16 @@ if (-not $Apply) {
     Write-Host "PREVIEW ONLY - no changes were made." -ForegroundColor Yellow
     if (-not $runtimeOk) {
         if ($existingCompatiblePython) {
-            Write-Host "  -> A compatible Python $PythonSeries x64 installation with Tcl/Tk already exists on this machine."
+            Write-Host "  -> Exact locked Python $PythonVersion x64 with Tcl/Tk already exists on this machine."
             Write-Host "  -> It will be copied into the private Vector runtime without altering the existing installation."
         } else {
-            if (-not $pythonInstaller) { Write-Host "  -> Official Python $PythonVersion installer will be downloaded from python.org." }
-            Write-Host "  -> Private Python runtime will be installed/repaired with Tcl/Tk, pip, pyserial and pywin32."
-            Write-Host "  -> If the official installer does not create TargetDir, Vector will search all common Windows locations for any compatible Python $PythonSeries x64 + Tcl/Tk and clone it."
+            if (-not $pythonInstaller) { Write-Host "  -> Locked Python $PythonVersion installer will be downloaded and SHA256-verified before execution." }
+            Write-Host "  -> Private runtime will receive only dependency-lock verified pyserial/pywin32 wheels."
+            Write-Host "  -> If the official installer does not create TargetDir, Vector will search for exact Python $PythonVersion x64 + Tcl/Tk and clone it."
         }
     }
     if ($runtimeOk -and -not $serviceHostOk) {
-        Write-Host "  -> pywin32 service host will be repaired inside the private runtime (pythonservice.exe + local DLLs)."
+        Write-Host "  -> pywin32 service host will be repaired from the verified locked pywin32 wheel."
     }
     if (-not $com0comSetup) { Write-Host "  -> com0com will be installed if its bundled installer is available." }
     exit 0
@@ -353,7 +414,7 @@ if (-not $runtimeOk) {
     } else {
         $pythonInstaller = Get-PythonInstaller -Download
         New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
-        Write-Host "Installing/repairing private Python $PythonVersion runtime with Tcl/Tk..."
+        Write-Host "Installing/repairing private locked Python $PythonVersion runtime with Tcl/Tk..."
         $args = @(
             '/quiet',
             'InstallAllUsers=1',
@@ -377,23 +438,22 @@ if (-not $runtimeOk) {
         if (-not (Test-Path $PythonExe -PathType Leaf)) {
             $fallbackPython = Find-CompatiblePython
             if ($fallbackPython) {
-                Write-Host "Python installer did not create TargetDir; cloning compatible Python into the Vector private runtime..." -ForegroundColor Yellow
+                Write-Host "Python installer did not create TargetDir; cloning exact locked Python into the Vector private runtime..." -ForegroundColor Yellow
                 Initialize-PrivateRuntimeFromExisting $fallbackPython
             }
         }
 
         if (-not (Test-Path $PythonExe -PathType Leaf)) {
             Show-PythonDiscoveryDiagnostics
-            throw "Python installer finished but runtime\python.exe is missing and no compatible Python $PythonSeries x64 + Tcl/Tk installation could be cloned."
+            throw "Python installer finished but runtime\python.exe is missing and no exact Python $PythonVersion x64 + Tcl/Tk installation could be cloned."
         }
     }
 
-    Write-Host "Installing Python dependencies..."
+    Write-Host "Installing locked Python dependencies..."
     $oldNoUserSite = $env:PYTHONNOUSERSITE
     try {
         $env:PYTHONNOUSERSITE = "1"
-        & $PythonExe -m pip install --disable-pip-version-check --upgrade "pyserial==3.5" "pywin32==312"
-        if ($LASTEXITCODE -ne 0) { throw "Failed to install pyserial/pywin32." }
+        & $LockedPackageInstaller -PythonExe $PythonExe
     }
     finally {
         $env:PYTHONNOUSERSITE = $oldNoUserSite
@@ -403,10 +463,11 @@ if (-not $runtimeOk) {
 Write-Host "Staging private pywin32 Windows-service host..."
 Ensure-Pywin32ServiceHost
 
-if (-not (Test-Runtime)) { throw "Private runtime validation failed after install/repair." }
+if (-not (Test-Runtime)) { throw "Private runtime validation failed after locked install/repair." }
 
 Write-Host ""
 Write-Host "Runtime/com0com ensure completed successfully." -ForegroundColor Green
 Write-Host "Python : $PythonExe"
 Write-Host "Service: $(Join-Path $RuntimeDir 'pythonservice.exe')"
 Write-Host "com0com: $com0comSetup"
+Write-Host "RUNTIME_DEPENDENCY_LOCK_OK" -ForegroundColor Green
