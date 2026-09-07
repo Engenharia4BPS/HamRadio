@@ -1,9 +1,9 @@
 {
   "product": "GADX Vector",
-  "version": "0.8.0-dev.8",
-  "phase": "D8D.3",
+  "version": "0.8.0-dev.9",
+  "phase": "D8D.3B",
   "channel": "development",
-  "baseline": "D8D.3A2-locked-wheel-install-validated-2026-09-06",
+  "baseline": "D8D.3A3-production-runtime-lock-validated-2026-09-07",
   "repository": "Engenharia4BPS/HamRadio",
   "path": "spikes/vector-hub-service",
   "supported_windows": [
