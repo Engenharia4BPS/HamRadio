@@ -211,37 +211,50 @@ Result: **D8D.3A.3 PRODUCTION RUNTIME DEPENDENCY LOCK VALIDATED IN FIELD.**
 
 ### D8D.3B - com0com distribution inventory and pinning
 
-Status: **IN FIELD VALIDATION**
-Release: `0.8.0-dev.10 / development / D8D.3B`
+Status: **INSTALLED LOCK VALIDATED; ONLINE DISTRIBUTION RETEST PENDING**
+Release: `0.8.0-dev.12 / development / D8D.3B`
+Date: 2026-09-07
 
-The remaining dependency gap is com0com. Python/runtime dependencies are reproducibly locked; com0com is still accepted as either already installed or supplied as a bundled installer.
-
-A read-only collector is used:
-
-```text
-inspect-com0com.ps1
-```
-
-It does not install, remove, renumber or modify any virtual COM pair. It inventories:
-
-- detected `setupc.exe` path;
-- uninstall-registry metadata;
-- signed PnP driver metadata;
-- installed executable/DLL/SYS file version, SHA256 and Authenticode status;
-- any known com0com installer candidate already present under Vector `thirdparty` directories.
-
-The purpose of this first D8D.3B field step is to identify exactly which installed/distribution artifact is in use before deciding the final redistribution and SHA256-lock policy.
-
-The first Windows PowerShell 5.1 field execution exposed a collector-only compatibility bug while materializing `System.Collections.Generic.List[object]` values inside an ordered hashtable:
-
-```text
-Argument types do not match
-```
-
-No system state was changed; the collector failed before output generation. The script was corrected to explicitly materialize each generic list with `.ToArray()` before building the result object. This is a read-only inventory fix and does not touch com0com or existing COM pairs.
-
-Acceptance for the inventory step remains:
+The read-only inventory identified the field installation as com0com `3.0.0.0` under `C:\Program Files (x86)\com0com` and captured exact hashes for the five relevant installed binaries. The inventory completed with:
 
 ```text
 COM0COM_INVENTORY_OK
+```
+
+The locked installed-file validator then passed for all five files:
+
+```text
+Installed com0com.sys: OK
+Installed setup.dll: OK
+Installed setupc.exe: OK
+Installed setupg.exe: OK
+Installed uninstall.exe: OK
+COM0COM_INSTALLED_LOCK_OK
+COM0COM_LOCK_STRUCTURE_OK
+```
+
+The first online distribution validation did not pass. The locked URL used the SourceForge web `/download` landing endpoint. Windows PowerShell downloaded content from that web endpoint, but the resulting file did not match the locked `261544` byte executable / SHA256 fingerprint. This was a transport-endpoint problem rather than an installed com0com mismatch.
+
+D8D.3B therefore changed the lock to the direct SourceForge download host:
+
+```text
+https://downloads.sourceforge.net/project/signed-drivers/com0com/v3.0/Setup_com0com_v3.0.0.0_W7_x64_signed.exe
+```
+
+The verifier now also prints the downloaded size and SHA256 whenever online validation fails, so any future mirror/proxy/content issue is immediately diagnosable.
+
+The distribution fingerprint remains unchanged:
+
+```text
+filename: Setup_com0com_v3.0.0.0_W7_x64_signed.exe
+size:     261544
+sha256:   26486b28604b49a9008c54feb11b9ece0008a8287ee5caf0bcf2a62f4317128f
+```
+
+Acceptance pending:
+
+```text
+COM0COM_INSTALLED_LOCK_OK
+COM0COM_DISTRIBUTION_LOCK_OK
+COM0COM_LOCK_ONLINE_OK
 ```
