@@ -37,7 +37,7 @@
     "version": "3.0.0.0",
     "architecture": "x64",
     "filename": "Setup_com0com_v3.0.0.0_W7_x64_signed.exe",
-    "url": "https://sourceforge.net/projects/signed-drivers/files/com0com/v3.0/Setup_com0com_v3.0.0.0_W7_x64_signed.exe/download",
+    "url": "https://downloads.sourceforge.net/project/signed-drivers/com0com/v3.0/Setup_com0com_v3.0.0.0_W7_x64_signed.exe",
     "size": 261544,
     "sha256": "26486b28604b49a9008c54feb11b9ece0008a8287ee5caf0bcf2a62f4317128f",
     "signer": "CyberCircuits",
