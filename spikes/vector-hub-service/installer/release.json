@@ -1,9 +1,9 @@
 {
   "product": "GADX Vector",
-  "version": "0.8.0-dev.18",
-  "phase": "D8F",
+  "version": "0.8.0-dev.19",
+  "phase": "D8G",
   "channel": "development",
-  "baseline": "D8F-current-state-report-field-validated-2026-09-07",
+  "baseline": "D8F-health-report-gui-field-validated-2026-09-07",
   "repository": "Engenharia4BPS/HamRadio",
   "path": "spikes/vector-hub-service",
   "supported_windows": [
