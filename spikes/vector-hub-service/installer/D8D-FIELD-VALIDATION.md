@@ -178,35 +178,62 @@ Result: **D8D.3A.2 LOCKED PYTHON INSTALLATION PATH VALIDATED IN FIELD.**
 
 ### D8D.3A.3 - Production ensure-runtime consumes lock
 
-Status: **IN FIELD VALIDATION**
+Status: **VALIDATED IN FIELD**
 Release: `0.8.0-dev.8 / development / D8D.3`
+Date: 2026-09-07
 
-Production `ensure-runtime.ps1` now consumes `dependency-lock.json` directly.
+Production `ensure-runtime.ps1` consumes `dependency-lock.json` directly.
 
-Changes:
-
-- runtime health requires exact Python `3.10.11`, pyserial `3.5` and pywin32 `312`;
-- downloaded or bundled Python installer must match the locked size + SHA256 before execution;
-- compatible existing Python reuse is restricted to exact Python `3.10.11` x64 + Tcl/Tk;
-- pyserial/pywin32 installation uses only verified locked wheels via `install-locked-python-packages.ps1`;
-- pywin32 service-host repair also reinstalls only from the locked pywin32 wheel;
-- successful production runtime preparation ends with `RUNTIME_DEPENDENCY_LOCK_OK`.
-
-An isolated production-path validator was added:
+The real-machine Preview reported:
 
 ```text
-verify-production-runtime-lock.ps1
+Dependency lock: Python 3.10.11 / pyserial 3.5 / pywin32 312
+Runtime      : OK - locked versions
+Service host : OK
+com0com      : C:\Program Files (x86)\com0com\setupc.exe
+PREVIEW ONLY - no changes were made.
 ```
 
-It requires com0com to already be installed, creates only a temporary Vector install root, invokes the real production `ensure-runtime.ps1 -Apply`, validates exact interpreter/package versions plus `pythonservice.exe`, `pywintypes310.dll` and `pythoncom310.dll`, and deletes the temporary runtime afterward.
-
-It does not register/start/stop the Vector service and does not modify Vector configuration or COM pairs.
-
-Acceptance:
+The isolated production-path validator then created a temporary Vector runtime and invoked the real production `ensure-runtime.ps1 -Apply`. The runtime was built from exact Python 3.10.11 and verified locked wheels. The test completed with:
 
 ```text
+LOCKED_PYTHON_PACKAGES_INSTALLED
+PYWIN32_SERVICE_HOST_OK
 RUNTIME_DEPENDENCY_LOCK_OK
 PRODUCTION_RUNTIME_IMPORTS_OK
 PRODUCTION_RUNTIME_SERVICE_HOST_OK
 PRODUCTION_RUNTIME_LOCK_TEST_OK
+```
+
+The temporary runtime was removed afterward. No Vector service registration/state, `vector.ini`, COM pair or radio state was changed by the validator.
+
+Result: **D8D.3A.3 PRODUCTION RUNTIME DEPENDENCY LOCK VALIDATED IN FIELD.**
+
+### D8D.3B - com0com distribution inventory and pinning
+
+Status: **IN FIELD VALIDATION**
+Release: `0.8.0-dev.9 / development / D8D.3B`
+
+The remaining dependency gap is com0com. Python/runtime dependencies are reproducibly locked; com0com is still accepted as either already installed or supplied as a bundled installer.
+
+A new read-only collector was added:
+
+```text
+inspect-com0com.ps1
+```
+
+It does not install, remove, renumber or modify any virtual COM pair. It inventories:
+
+- detected `setupc.exe` path;
+- uninstall-registry metadata;
+- signed PnP driver metadata;
+- installed executable/DLL/SYS file version, SHA256 and Authenticode status;
+- any known com0com installer candidate already present under Vector `thirdparty` directories.
+
+The purpose of this first D8D.3B field step is to identify exactly which installed/distribution artifact is in use before deciding the final redistribution and SHA256-lock policy.
+
+Acceptance for the inventory step:
+
+```text
+COM0COM_INVENTORY_OK
 ```
