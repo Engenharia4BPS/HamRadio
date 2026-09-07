@@ -212,11 +212,11 @@ Result: **D8D.3A.3 PRODUCTION RUNTIME DEPENDENCY LOCK VALIDATED IN FIELD.**
 ### D8D.3B - com0com distribution inventory and pinning
 
 Status: **IN FIELD VALIDATION**
-Release: `0.8.0-dev.9 / development / D8D.3B`
+Release: `0.8.0-dev.10 / development / D8D.3B`
 
 The remaining dependency gap is com0com. Python/runtime dependencies are reproducibly locked; com0com is still accepted as either already installed or supplied as a bundled installer.
 
-A new read-only collector was added:
+A read-only collector is used:
 
 ```text
 inspect-com0com.ps1
@@ -232,7 +232,15 @@ It does not install, remove, renumber or modify any virtual COM pair. It invento
 
 The purpose of this first D8D.3B field step is to identify exactly which installed/distribution artifact is in use before deciding the final redistribution and SHA256-lock policy.
 
-Acceptance for the inventory step:
+The first Windows PowerShell 5.1 field execution exposed a collector-only compatibility bug while materializing `System.Collections.Generic.List[object]` values inside an ordered hashtable:
+
+```text
+Argument types do not match
+```
+
+No system state was changed; the collector failed before output generation. The script was corrected to explicitly materialize each generic list with `.ToArray()` before building the result object. This is a read-only inventory fix and does not touch com0com or existing COM pairs.
+
+Acceptance for the inventory step remains:
 
 ```text
 COM0COM_INVENTORY_OK
