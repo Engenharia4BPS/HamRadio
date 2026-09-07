@@ -7,6 +7,7 @@ $InstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)
 $InstallerRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SetupScript = Join-Path $InstallerRoot "setup-vector.ps1"
 $PortManagerLauncher = Join-Path $InstallerRoot "launch-port-manager.ps1"
+$InstallationReport = Join-Path $InstallerRoot "installation-report.ps1"
 
 function Test-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -55,6 +56,14 @@ function Invoke-SetupBackend([switch]$Apply) {
     }
 }
 
+function Invoke-InstallationReport {
+    $raw = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $InstallationReport -InstallRoot $InstallRoot 2>&1
+    [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Output = (($raw | Out-String).TrimEnd())
+    }
+}
+
 function Runtime-Label($runtime) {
     if (-not $runtime.python_exe) { return "MISSING" }
     if ($runtime.tkinter -and $runtime.pyserial -and $runtime.pywin32) { return "OK" }
@@ -65,6 +74,11 @@ function Test-PortManagerReady {
     if (-not (Test-Path $PortManagerLauncher -PathType Leaf)) { return $false }
     if (-not $script:currentState) { return $false }
     return [bool]$script:currentState.detector.runtime.python_exe
+}
+
+function Test-InstallationReportReady {
+    if (-not (Test-Path $InstallationReport -PathType Leaf)) { return $false }
+    return [bool]$script:currentState
 }
 
 $form = New-Object System.Windows.Forms.Form
@@ -120,7 +134,7 @@ $com0comValue = Add-StatusLabel "com0com" 420 90
 $safetyValue = Add-StatusLabel "Safety" 420 120
 
 $detailsLabel = New-Object System.Windows.Forms.Label
-$detailsLabel.Text = "Preview / execution log"
+$detailsLabel.Text = "Preview / execution / health report"
 $detailsLabel.AutoSize = $true
 $detailsLabel.Location = New-Object System.Drawing.Point(20,282)
 $detailsLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold",9)
@@ -143,6 +157,14 @@ $statusBar.AutoSize = $true
 $statusBar.Location = New-Object System.Drawing.Point(22,607)
 $statusBar.Anchor = 'Bottom,Left'
 $form.Controls.Add($statusBar)
+
+$healthButton = New-Object System.Windows.Forms.Button
+$healthButton.Text = "Health Report"
+$healthButton.Size = New-Object System.Drawing.Size(120,32)
+$healthButton.Location = New-Object System.Drawing.Point(162,615)
+$healthButton.Anchor = 'Bottom,Right'
+$healthButton.Enabled = $false
+$form.Controls.Add($healthButton)
 
 $portManagerButton = New-Object System.Windows.Forms.Button
 $portManagerButton.Text = "Port Manager"
@@ -184,8 +206,18 @@ $form.Controls.Add($closeButton)
 $script:currentState = $null
 $script:previewPassed = $false
 
+function Restore-Buttons {
+    $healthButton.Enabled = (Test-InstallationReportReady)
+    $portManagerButton.Enabled = (Test-PortManagerReady)
+    $refreshButton.Enabled = $true
+    $previewButton.Enabled = $true
+    $closeButton.Enabled = $true
+    $applyButton.Enabled = ($script:previewPassed -and $script:currentState -and $script:currentState.recommended_mode -ne 'NONE')
+}
+
 function Set-Busy([bool]$busy,[string]$message) {
     $form.UseWaitCursor = $busy
+    $healthButton.Enabled = $false
     $portManagerButton.Enabled = $false
     $refreshButton.Enabled = -not $busy
     $previewButton.Enabled = -not $busy
@@ -240,12 +272,33 @@ function Refresh-State {
     }
     finally {
         $form.UseWaitCursor = $false
-        $portManagerButton.Enabled = (Test-PortManagerReady)
-        $refreshButton.Enabled = $true
-        $previewButton.Enabled = $true
-        $closeButton.Enabled = $true
+        Restore-Buttons
     }
 }
+
+$healthButton.Add_Click({
+    if (-not (Test-InstallationReportReady)) { return }
+    Set-Busy $true "Running read-only health report..."
+    try {
+        $result = Invoke-InstallationReport
+        $logBox.Text = $result.Output
+        if ($result.ExitCode -eq 0) {
+            $statusBar.Text = "Health report: INSTALLATION STATUS READY."
+        } elseif ($result.ExitCode -eq 3) {
+            $statusBar.Text = "Health report: ATTENTION REQUIRED. Review the report above."
+        } else {
+            $statusBar.Text = "Health report failed. Review the output above."
+        }
+    }
+    catch {
+        $logBox.Text = $_.Exception.Message
+        $statusBar.Text = "Unable to run health report."
+    }
+    finally {
+        $form.UseWaitCursor = $false
+        Restore-Buttons
+    }
+})
 
 $portManagerButton.Add_Click({
     try {
@@ -291,11 +344,7 @@ $previewButton.Add_Click({
     }
     finally {
         $form.UseWaitCursor = $false
-        $portManagerButton.Enabled = (Test-PortManagerReady)
-        $refreshButton.Enabled = $true
-        $previewButton.Enabled = $true
-        $closeButton.Enabled = $true
-        if ($script:previewPassed -and $script:currentState -and $script:currentState.recommended_mode -ne 'NONE') { $applyButton.Enabled = $true }
+        Restore-Buttons
     }
 })
 
@@ -331,12 +380,9 @@ $applyButton.Add_Click({
     }
     finally {
         $form.UseWaitCursor = $false
-        $portManagerButton.Enabled = (Test-PortManagerReady)
-        $refreshButton.Enabled = $true
-        $previewButton.Enabled = $true
-        $closeButton.Enabled = $true
         $applyButton.Enabled = $false
         $script:previewPassed = $false
+        Restore-Buttons
     }
 })
 
