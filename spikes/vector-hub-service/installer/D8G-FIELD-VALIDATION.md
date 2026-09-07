@@ -52,51 +52,85 @@ No build is promoted to `rc` until the matrix has sufficient real-machine/VM evi
 
 ## D8G.1 - Packaged CURRENT-healthy baseline
 
-Status: **IN FIELD VALIDATION**
-Release: `0.8.0-dev.19 / development / D8G`
+Status: **VALIDATED IN FIELD**
+Release tested: `0.8.0-dev.19 / development / D8G`
+Date: 2026-09-07
 
-The first D8G test intentionally uses the already healthy field station and is non-destructive.
+The first D8G test intentionally used the already healthy field station and was non-destructive with respect to service, runtime, COMs, `vector.ini` and radio state.
 
-Purpose:
+The installed bootstrap refreshed to immutable source commit:
 
-1. refresh the installed installer to the exact D8G source commit;
-2. build a ZIP from that immutable source lock;
-3. verify every packaged file using `package-manifest.json`;
-4. extract the package into a temporary/local test directory;
-5. verify the extracted package again;
-6. execute the packaged bootstrap in Preview mode only;
-7. confirm the package remains pinned to its immutable commit and detects the real installation as `CURRENT / NONE / Payload drift NO`;
-8. optionally open the packaged Setup GUI and run Health Report; Apply must remain disabled.
+```text
+532024deeb15196b88ca31d2f34c6d9475024d46
+```
 
-This test must not change service, COMs, runtime, `vector.ini` or radio state.
+The package builder produced:
 
-Expected package verification:
+```text
+C:\Ham\GADX-Vector\dist\GADX-Vector-0.8.0-dev.19.zip
+ZIP SHA256: 3468d55192d3ea9f50d632ebbca182fd1a6ba3c37290462eff4a2d38c22022a1
+Package files: 42
+```
+
+The extracted package verifier checked 41 manifest-tracked files and returned:
 
 ```text
 PACKAGE_VERIFY_OK
 ```
 
-Expected packaged-bootstrap state:
+The decisive packaged-bootstrap test was then run from the extracted ZIP without `-RefreshSource` and without `-Apply`. It reported:
 
 ```text
+Source       : Engenharia4BPS/HamRadio @ 532024deeb15196b88ca31d2f34c6d9475024d46
 Resolution   : package-lock
+Mode         : PREVIEW
 Release      : 0.8.0-dev.19 / development / D8G
+Pinned commit: 532024deeb15196b88ca31d2f34c6d9475024d46
 Detected     : CURRENT
 Mode         : NONE
 Payload drift: NO
 ```
 
-Expected packaged GUI/health state:
+The package therefore proved both integrity and immutable source behavior while recognizing the current healthy installation correctly.
+
+Result: **D8G.1 PACKAGED CURRENT-HEALTHY BASELINE VALIDATED IN FIELD.**
+
+---
+
+## D8G.2 - Packaged CURRENT payload-drift detection
+
+Status: **IN FIELD VALIDATION**
+Next release: `0.8.0-dev.20 / development / D8G`
+
+Purpose: repeat the earlier D8C drift behavior using the D8G product generation and prove that a harmless installed auxiliary-file drift is detected as `CURRENT / REPAIR / Payload drift YES` without touching the running Hub.
+
+The selected controlled drift target is:
 
 ```text
-Detected       CURRENT
-Recommended    NONE
-Payload drift  NO
-INSTALLATION STATUS : READY
-D8F_COMMISSIONING_REPORT_OK
+C:\Ham\GADX-Vector\tools\port_manager.py
 ```
 
-Result remains pending field execution.
+This file is part of payload-drift detection but is not loaded by the running Hub service, making it suitable for a non-radio-impacting detector test when the Port Manager itself is closed.
+
+Acceptance before any repair Apply:
+
+```text
+Detected     : CURRENT
+Mode         : REPAIR
+Payload drift: YES - installed files differ from current installer payload
+```
+
+Preview must also show the D7 safety gate for a future Apply while leaving the currently running Hub untouched during Preview.
+
+After the detector/Preview evidence is captured, the exact packaged payload copy must be restored and the machine must return to:
+
+```text
+Detected     : CURRENT
+Mode         : NONE
+Payload drift: NO
+```
+
+No `-Apply` repair is required for this detector-only D8G.2 test.
 
 ---
 
@@ -105,8 +139,8 @@ Result remains pending field execution.
 | Scenario | Status | Evidence |
 | --- | --- | --- |
 | CLEAN Windows 10/11 | Pending | Requires clean VM/machine, including com0com driver test |
-| CURRENT healthy | In validation | D8G.1 packaged baseline on current field station |
-| CURRENT payload drift | Pending | Existing D8C evidence will be repeated on D8G package |
+| CURRENT healthy | **Validated** | D8G.1 ZIP integrity + package-lock Preview on field station |
+| CURRENT payload drift | In validation | D8G.2 controlled Port Manager payload drift |
 | CURRENT broken/incomplete | Pending | Requires controlled test state |
 | LEGACY GADXVectorBridge | Pending | Requires legacy fixture/VM |
 | Runtime absent | Pending | Requires isolated/clean test root or VM |
@@ -114,4 +148,3 @@ Result remains pending field execution.
 | Reboot after COM changes | Pending | Requires COM provisioning test |
 | Repeated repair/idempotence | Pending | Requires D8G package repeat test |
 | Induced failure + rollback | Pending | Requires controlled failure test |
-
