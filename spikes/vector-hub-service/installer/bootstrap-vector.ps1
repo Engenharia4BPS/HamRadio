@@ -1,6 +1,7 @@
 param(
     [string]$InstallRoot = "C:\Ham\GADX-Vector",
-    [switch]$Apply
+    [switch]$Apply,
+    [switch]$RefreshSource
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,16 +71,21 @@ function Write-SourceLock([string]$Path,[string]$RequestedRef,[string]$Commit,[s
 
 Assert-Administrator
 
-$pinnedCommit = Get-PinnedSourceCommit
-if ($pinnedCommit) {
-    $sourceCommit = $pinnedCommit
-    $requestedRef = $DefaultRef
-    $resolution = "package-lock"
+$requestedRef = $DefaultRef
+if ($RefreshSource) {
+    $sourceCommit = Resolve-GitHubCommit $requestedRef
+    $resolution = "resolved-ref-refresh"
 }
 else {
-    $requestedRef = $DefaultRef
-    $sourceCommit = Resolve-GitHubCommit $requestedRef
-    $resolution = "resolved-ref"
+    $pinnedCommit = Get-PinnedSourceCommit
+    if ($pinnedCommit) {
+        $sourceCommit = $pinnedCommit
+        $resolution = "package-lock"
+    }
+    else {
+        $sourceCommit = Resolve-GitHubCommit $requestedRef
+        $resolution = "resolved-ref"
+    }
 }
 
 $tempRoot = Join-Path $env:TEMP ("GADX-Vector-bootstrap-" + [Guid]::NewGuid().ToString("N"))
@@ -94,6 +100,7 @@ Write-Host "Install root : $InstallRoot"
 Write-Host "Source       : $Repository @ $sourceCommit"
 Write-Host "Resolution   : $resolution"
 Write-Host "Mode         : $(if ($Apply) { 'APPLY' } else { 'PREVIEW' })"
+if ($RefreshSource) { Write-Host "Source policy: explicit refresh of $DefaultRef (local package lock bypassed once)" -ForegroundColor Yellow }
 Write-Host ""
 
 try {
