@@ -40,8 +40,9 @@ This is expected when the package is built from `C:\Ham\GADX-Vector\installer`, 
 
 ## D8D.2 - Immutable source pinning
 
-Status: **IN FIELD VALIDATION**
+Status: **PACKAGE BUILD + VERIFY VALIDATED; PACKAGED BOOTSTRAP TEST PENDING**
 Release: `0.8.0-dev.5 / development / D8D`
+Date: 2026-09-06
 
 Design:
 
@@ -52,14 +53,65 @@ Design:
 5. The distribution package receives its own `source-lock.json` with `resolution = immutable-package-lock`.
 6. When the packaged bootstrap is executed, it reads the package lock and downloads that exact commit without resolving `main` again.
 
-Expected package behavior:
+### Field evidence
+
+The local bootstrap resolved `main` to:
 
 ```text
-Source       : Engenharia4BPS/HamRadio @ <40-char SHA>
+34deed4b4ec64285eb24598568bb4162014e8e51
+```
+
+Observed bootstrap output:
+
+```text
+Source       : Engenharia4BPS/HamRadio @ 34deed4b4ec64285eb24598568bb4162014e8e51
+Resolution   : resolved-ref
+Release      : 0.8.0-dev.5 / development / D8D
+Pinned commit: 34deed4b4ec64285eb24598568bb4162014e8e51
+```
+
+The installed source lock contained the same commit:
+
+```text
+repository    = Engenharia4BPS/HamRadio
+requested_ref = main
+source_commit = 34deed4b4ec64285eb24598568bb4162014e8e51
+resolution    = resolved-ref
+```
+
+The release builder then reported:
+
+```text
+Source commit: 34deed4b4ec64285eb24598568bb4162014e8e51
+Resolution   : source-lock
+Pinned commit: 34deed4b4ec64285eb24598568bb4162014e8e51
+```
+
+Generated package:
+
+```text
+C:\Ham\GADX-Vector\dist\GADX-Vector-0.8.0-dev.5.zip
+SHA256: 941ba4f38dabc25826afff4ce9c3278e8aee27b017f87c449ddeb7ad0066d5fa
+```
+
+After extraction, `verify-package.ps1` checked 27 manifest-tracked files and returned:
+
+```text
+PACKAGE_VERIFY_OK
+```
+
+The stale `%TEMP%\gadx-vector-bootstrap.ps1` was also replaced with the current pinned bootstrap to prevent accidentally returning to the pre-D8D moving-main behavior during field development.
+
+### Remaining acceptance test
+
+Run `bootstrap-vector.ps1` from the extracted `0.8.0-dev.5` package and confirm that it reports:
+
+```text
+Source       : Engenharia4BPS/HamRadio @ 34deed4b4ec64285eb24598568bb4162014e8e51
 Resolution   : package-lock
 ```
 
-The same SHA must appear in:
+The same SHA must continue to appear in:
 
 ```text
 source-lock.json
@@ -68,4 +120,4 @@ PACKAGE-README.txt -> Source
 bootstrap console output
 ```
 
-Acceptance requires that package verification still returns `PACKAGE_VERIFY_OK` and that the packaged bootstrap reports `Resolution: package-lock` using the same commit SHA.
+If that test passes, D8D.2 immutable source pinning is fully field-validated.
