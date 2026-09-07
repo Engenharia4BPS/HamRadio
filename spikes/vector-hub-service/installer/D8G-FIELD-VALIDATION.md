@@ -4,24 +4,18 @@
 
 Date: 2026-09-07
 Release baseline: `0.8.0-dev.18 / development / D8F`
-Current D8G release: `0.8.0-dev.25 / development / D8G`
+Current D8G release: `0.8.0-dev.26 / development / D8G`
 
-D8F is field-validated on the current station. The main GADX Vector Setup GUI exposes both Port Manager and Health Report. The read-only commissioning report ended with:
+D8F is field-validated on the current station. The main GADX Vector Setup GUI exposes Port Manager and Health Report, and the read-only commissioning report reaches:
 
 ```text
 INSTALLATION STATUS : READY
 D8F_COMMISSIONING_REPORT_OK
 ```
 
-The current field machine is therefore a suitable baseline for the release-candidate matrix.
+D8G proves that the productized installer/package can be repeated safely across supported installation states before promotion to an actual `rc` channel.
 
----
-
-## D8G objective
-
-D8G proves that the productized installer/package can be repeated safely across the supported installation states before promoting the build to an actual `rc` channel.
-
-The release candidate matrix is:
+## Release-candidate matrix
 
 ```text
 1. CLEAN Windows 10/11
@@ -36,47 +30,38 @@ The release candidate matrix is:
 10. induced failure + rollback
 ```
 
-Additional compatibility observations required during D8G:
-
-- Windows build/version and architecture;
-- Secure Boot state where available;
-- locked com0com 3.0.0.0 driver installation behavior;
-- package/source lock identity;
-- final D8F commissioning status;
-- preservation of `vector.ini` and existing COM pairs where required;
-- PTT safe state before declaring READY.
+Compatibility observations required during D8G include Windows build/architecture, firmware/Secure Boot where available, locked com0com behavior, immutable package/source identity, final D8F commissioning status, `vector.ini` preservation, COM-pair preservation and PTT safe state before READY.
 
 No build is promoted to `rc` until the matrix has sufficient real-machine/VM evidence.
 
 ---
 
-## D8G.1 - Packaged CURRENT-healthy baseline
+## D8G.1 - Packaged CURRENT healthy
 
 Status: **VALIDATED IN FIELD**
-Release tested: `0.8.0-dev.19 / development / D8G`
-Date: 2026-09-07
+Release tested: `0.8.0-dev.19`
 
-The installed bootstrap refreshed to immutable source commit `532024deeb15196b88ca31d2f34c6d9475024d46`. The package ZIP SHA256 was `3468d55192d3ea9f50d632ebbca182fd1a6ba3c37290462eff4a2d38c22022a1`, `PACKAGE_VERIFY_OK` passed, and the packaged bootstrap returned:
+The package was built from immutable source commit `532024deeb15196b88ca31d2f34c6d9475024d46`.
 
 ```text
+ZIP SHA256: 3468d55192d3ea9f50d632ebbca182fd1a6ba3c37290462eff4a2d38c22022a1
+PACKAGE_VERIFY_OK
 Resolution   : package-lock
-Release      : 0.8.0-dev.19 / development / D8G
 Detected     : CURRENT
 Mode         : NONE
 Payload drift: NO
 ```
 
-Result: **D8G.1 PACKAGED CURRENT-HEALTHY BASELINE VALIDATED IN FIELD.**
+Result: **VALIDATED.**
 
 ---
 
-## D8G.2 - CURRENT payload-drift detection
+## D8G.2 - CURRENT payload drift
 
 Status: **VALIDATED IN FIELD**
-Release tested: `0.8.0-dev.20 / development / D8G`
-Date: 2026-09-07
+Release tested: `0.8.0-dev.20`
 
-A controlled drift in `tools\port_manager.py` was detected as:
+A controlled drift in `tools\port_manager.py` was correctly detected as:
 
 ```text
 Detected     : CURRENT
@@ -84,36 +69,34 @@ Mode         : REPAIR
 Payload drift: YES - installed files differ from current installer payload
 ```
 
-The D7 safety gate was exposed before any possible Apply. No `-Apply` was used. The exact original file was restored, SHA256 matched the installer payload, and final Preview returned `CURRENT / NONE / Payload drift NO`.
+The D7 safety gate was exposed before any Apply. No repair was executed in this detector-only test. The exact original file was restored, SHA256 matched the installer payload, and final Preview returned `CURRENT / NONE / Payload drift NO`.
 
-Result: **D8G.2 CURRENT PAYLOAD-DRIFT DETECTION + SAFE RESTORE VALIDATED IN FIELD.**
+Result: **VALIDATED.**
 
 ---
 
-## D8G.3 - CURRENT broken/incomplete Preview fixture
+## D8G.3 - CURRENT broken/incomplete fixture
 
 Status: **VALIDATED IN FIELD**
-Release tested: `0.8.0-dev.21 / development / D8G`
-Date: 2026-09-07
+Release tested: `0.8.0-dev.21`
 
-`verify-d8g-broken-preview.ps1` created a temporary install root containing only `app\vector_hub.py`. Production detection returned `BROKEN / REPAIR`; runtime and configuration were correctly reported missing. The real station remained `CURRENT / NONE`, service `Running`, and real `vector.ini` SHA256 unchanged.
+`verify-d8g-broken-preview.ps1` created a temporary incomplete install root. Production detection returned `BROKEN / REPAIR`; runtime and configuration were correctly reported missing. The real station remained `CURRENT / NONE`, service `Running`, and real `vector.ini` SHA256 unchanged.
 
 ```text
 D8G_BROKEN_FIXTURE_DETECTED
 D8G_BROKEN_PREVIEW_SAFE
 ```
 
-Result: **D8G.3 CURRENT BROKEN/INCOMPLETE PREVIEW DETECTION VALIDATED IN FIELD.**
+Result: **VALIDATED.**
 
 ---
 
-## D8G.4 - Runtime absent / isolated production creation
+## D8G.4 - Runtime absent
 
 Status: **VALIDATED IN FIELD**
-Release tested: `0.8.0-dev.22 / development / D8G`
-Date: 2026-09-07
+Release tested: `0.8.0-dev.22`
 
-`verify-production-runtime-lock.ps1` created a temporary Vector install root with no runtime and called production `ensure-runtime.ps1 -Apply` only against that temporary root. System com0com was already present and matched the lock.
+`verify-production-runtime-lock.ps1` created a temporary install root with no runtime and exercised production `ensure-runtime.ps1 -Apply` only against that temporary root.
 
 ```text
 LOCKED_PYTHON_PACKAGES_INSTALLED
@@ -125,23 +108,16 @@ PRODUCTION_RUNTIME_SERVICE_HOST_OK
 PRODUCTION_RUNTIME_LOCK_TEST_OK
 ```
 
-Result: **D8G.4 RUNTIME-ABSENT PRODUCTION CREATION VALIDATED IN FIELD.**
+Result: **VALIDATED.**
 
 ---
 
-## D8G.5 - Runtime version drift / production repair fixture
+## D8G.5 - Runtime incomplete/version drift
 
 Status: **VALIDATED IN FIELD**
-Release tested: `0.8.0-dev.23 / development / D8G`
-Date: 2026-09-07
+Release tested: `0.8.0-dev.23`
 
-`verify-d8g-runtime-drift.ps1` created a healthy locked runtime in a temporary root, changed only temporary pyserial metadata from `3.5` to `3.4`, and proved production Preview rejected it as:
-
-```text
-Runtime      : INCOMPLETE OR VERSION DRIFT
-```
-
-Production `ensure-runtime.ps1 -Apply` then rebuilt the temporary private runtime from exact locked dependencies and restored pyserial `3.5`, pywin32 `312`, tkinter and the pywin32 service host.
+`verify-d8g-runtime-drift.ps1` changed only temporary pyserial metadata from `3.5` to `3.4`. Production Preview rejected the runtime as `INCOMPLETE OR VERSION DRIFT`; production Apply rebuilt the temporary runtime from exact locked dependencies.
 
 ```text
 D8G_RUNTIME_DRIFT_INTRODUCED pyserial=3.4
@@ -150,85 +126,142 @@ D8G_RUNTIME_DRIFT_REPAIR_OK
 D8G_RUNTIME_DRIFT_FIXTURE_SAFE
 ```
 
-The real installation remained `CURRENT / NONE`, service `Running`, with real `vector.ini` SHA256 unchanged.
-
-Result: **D8G.5 RUNTIME VERSION-DRIFT DETECTION + PRODUCTION REPAIR VALIDATED IN FIELD.**
+Result: **VALIDATED.**
 
 ---
 
-## D8G.6 - LEGACY configuration migration Preview fixture
+## D8G.6 - LEGACY migration Preview
 
-Status: **VALIDATED IN FIELD**
-Release tested: `0.8.0-dev.24 / development / D8G`
-Date: 2026-09-07
+Status: **VALIDATED IN FIELD FOR CONFIGURATION; REAL SERVICE HANDOFF STILL REQUIRES VM**
+Release tested: `0.8.0-dev.24`
 
-`verify-d8g-legacy-preview.ps1` created a temporary representative `config\bridge_multi.ini`, then ran production detection, the production migration planner and full production Setup Preview against that temporary root.
-
-Production detection returned:
+`verify-d8g-legacy-preview.ps1` created a representative temporary `bridge_multi.ini`. Production detection returned `LEGACY / MIGRATE_REPAIR`; the migration plan preserved representative CAT, keying, radio keying, rigctld and com0com state.
 
 ```text
-Detected    : LEGACY
-Recommended : MIGRATE_REPAIR
 D8G_LEGACY_FIXTURE_DETECTED
-```
-
-The migration plan preserved the representative legacy settings:
-
-```text
-CAT          : COM9, COM15
-Keying       : 2 clients
-Radio keying : COM22 PTT=RIGCTLD CW=RTS
-rigctld      : 127.0.0.1:4532
-com0com      : preserve existing pairs
 D8G_LEGACY_PLAN_OK
-```
-
-Full Setup Preview remained non-destructive and described the transactional `GADXVectorBridge -> GADXVectorHub` handoff without creating `vector.ini` or touching the real station. Final real-state verification returned:
-
-```text
-Detected      : CURRENT
-Recommended   : NONE
-Payload drift : NO
-Service       : Running
-vector.ini    : SHA256 unchanged
-
 D8G_LEGACY_PREVIEW_SAFE
 ```
 
-This validates legacy-file detection and migration planning on the field machine. Actual legacy Windows-service replacement remains reserved for a clean VM/machine before RC promotion.
-
-Result: **D8G.6 LEGACY CONFIGURATION MIGRATION PREVIEW VALIDATED IN FIELD.**
+Actual `GADXVectorBridge -> GADXVectorHub` Windows-service handoff remains reserved for a clean VM/machine.
 
 ---
 
-## D8G.7 - Repeated repair / idempotence on field station
+## D8G.7 - Real repair / idempotence
 
-Status: **IN FIELD VALIDATION**
-Release: `0.8.0-dev.25 / development / D8G`
+Status: **VALIDATED IN FIELD**
+Release tested: `0.8.0-dev.25`
+Date: 2026-09-07
 
-This scenario intentionally exercises one real D7 repair transaction on the already validated field station, followed by a second detection pass proving the repaired state is idempotent.
+The station started healthy with D8F reporting PTT safe state `t -> 0`. A controlled drift was introduced only in `tools\port_manager.py`; Preview returned `CURRENT / REPAIR / Payload drift YES` and exposed the D7 safety gate.
 
-The controlled drift target remains:
+### First real Apply - fail-safe path observed
+
+The first real D7 Apply quiesced the service, validated locked runtime/com0com, deployed current payload, preserved `vector.ini`, installed and started the new Hub, then refused READY because the final live PTT check returned:
 
 ```text
-C:\Ham\GADX-Vector\tools\port_manager.py
+PTT safety validation failed: rigctld t returned '1' instead of 0.
 ```
 
-It is suitable because the running Hub does not load this file. Before Apply, the station must be in RX, rigctld PTT must read `0`, and the RF amplifier should be disabled/off as an additional physical precaution.
+The transaction then executed its safety path:
 
-Expected sequence:
+```text
+Preserving failed Hub evidence, restoring backed-up application files and leaving the Hub stopped/disabled for safety...
+Failed Hub log preserved at:
+C:\Ham\GADX-Vector\backups\repair-20260907-201211\logs\failed-vector-hub.log
+```
 
-1. refresh to exact `0.8.0-dev.25` installer source;
-2. save SHA256 of `vector.ini` and inventory of existing com0com pairs;
-3. introduce harmless payload drift only in `tools\port_manager.py`;
-4. require Preview `CURRENT / REPAIR / Payload drift YES` and the D7 safety gate;
-5. run production `setup-vector.ps1 -Apply` while radio is in RX and amplifier is disabled;
-6. require D7 transaction success, preserved `vector.ini`, unchanged com0com pairs, `GADXVectorHub Running / delayed-auto`, and PTT safe state OFF;
-7. run Setup again and require `CURRENT / NONE / Payload drift NO`;
-8. run D8F Health Report and require `INSTALLATION STATUS : READY`;
-9. compare `vector.ini` SHA256 and com0com pair inventory with pre-test snapshots.
+This is real field evidence that a non-safe PTT state prevents READY and triggers rollback/safe shutdown. The condition was not deliberately induced, so it counts as **partial evidence** for the matrix item `induced failure + rollback`, not full validation of that scenario.
 
-This scenario proves that a real repair returns the installation to a stable state where repeating Setup becomes a no-op rather than triggering another repair.
+### Second real Apply - successful repair
+
+A second Apply, with PTT safe, completed:
+
+```text
+D7 REPAIR/UPDATE completed successfully.
+Backup             : C:\Ham\GADX-Vector\backups\repair-20260907-201230
+vector.ini         : preserved (SHA256 unchanged)
+com0com pairs      : unchanged
+GADXVectorHub      : Running / delayed-auto
+PTT safe state     : OFF
+INSTALLATION STATUS: READY
+```
+
+Post-repair idempotence checks returned:
+
+```text
+Detected     : CURRENT
+Mode         : NONE
+Payload drift: NO
+
+INSTALLATION STATUS : READY
+D8F_COMMISSIONING_REPORT_OK
+```
+
+The final Health Report also showed:
+
+```text
+Runtime        : OK - dependency lock
+com0com        : OK - locked 3.0.0.0
+Service        : Running / Auto
+Hub process    : OK
+Hub protocol   : OK
+Rig poll hist  : OK - no errors in last 500 log lines
+PTT safe state : OK - t -> 0
+Reboot pending : False
+```
+
+`vector.ini` preservation was proven with the same SHA256 before, after and in the successful repair backup:
+
+```text
+1F43E2FBA13E418C81FB86D5B0978FAA222007BD1075D2A4811EE781214D5BF8
+Before match : True
+Backup match : True
+```
+
+Windows service state was:
+
+```text
+GADXVectorHub Running
+Start            : 2
+DelayedAutoStart : 1
+```
+
+The existing six com0com pairs remained unchanged:
+
+```text
+COM9  <-> COM101
+COM29 <-> COM102
+COM15 <-> COM103
+COM30 <-> COM104
+COM31 <-> COM106
+COM16 <-> COM105
+```
+
+Result: **D8G.7 REAL REPAIR + IDEMPOTENCE VALIDATED IN FIELD.**
+
+---
+
+## D8G.8 - Host compatibility inventory
+
+Status: **IN FIELD VALIDATION**
+Release: `0.8.0-dev.26 / development / D8G`
+
+A new read-only inventory script is provided:
+
+```text
+installer/inspect-d8g-host.ps1
+```
+
+It records Windows caption/version/build, architecture, PowerShell version, firmware mode, Secure Boot state where queryable, reboot-pending state and detected com0com path/version. It performs no install, service or COM changes.
+
+Expected terminal marker:
+
+```text
+D8G_HOST_COMPATIBILITY_INVENTORY_OK
+```
+
+This information will be used to characterize the current field machine before the remaining clean-VM tests.
 
 ---
 
@@ -236,13 +269,13 @@ This scenario proves that a real repair returns the installation to a stable sta
 
 | Scenario | Status | Evidence |
 | --- | --- | --- |
-| CLEAN Windows 10/11 | Pending | Requires clean VM/machine, including com0com driver test |
-| CURRENT healthy | **Validated** | D8G.1 ZIP integrity + package-lock Preview on field station |
+| CLEAN Windows 10/11 | Pending | Requires clean VM/machine, including com0com driver installation |
+| CURRENT healthy | **Validated** | D8G.1 package integrity + package-lock Preview |
 | CURRENT payload drift | **Validated** | D8G.2 controlled Port Manager drift + exact restore |
 | CURRENT broken/incomplete | **Validated** | D8G.3 isolated production Preview fixture |
-| LEGACY GADXVectorBridge | Partial | D8G.6 legacy INI migration Preview validated; real service handoff still requires VM |
+| LEGACY GADXVectorBridge | Partial | D8G.6 legacy config migration validated; real service handoff requires VM |
 | Runtime absent | **Validated** | D8G.4 isolated production runtime creation |
-| Runtime incomplete/version drift | **Validated** | D8G.5 isolated pyserial version-drift + production repair fixture |
-| Reboot after COM changes | Pending | Requires COM provisioning test |
-| Repeated repair/idempotence | In validation | D8G.7 real controlled repair on field station |
-| Induced failure + rollback | Pending | Requires controlled failure test |
+| Runtime incomplete/version drift | **Validated** | D8G.5 isolated version-drift + production repair |
+| Reboot after COM changes | Pending | Requires clean COM provisioning/reboot test |
+| Repeated repair/idempotence | **Validated** | D8G.7 real repair, final no-op detection and preserved state |
+| Induced failure + rollback | Partial evidence | D8G.7 first Apply hit real PTT unsafe condition and executed rollback/safe shutdown; deliberate controlled failure still pending |
