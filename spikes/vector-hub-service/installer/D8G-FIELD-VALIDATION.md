@@ -4,7 +4,7 @@
 
 Date: 2026-09-07
 Release baseline: `0.8.0-dev.18 / development / D8F`
-Current D8G release: `0.8.0-dev.24 / development / D8G`
+Current D8G release: `0.8.0-dev.25 / development / D8G`
 
 D8F is field-validated on the current station. The main GADX Vector Setup GUI exposes both Port Manager and Health Report. The read-only commissioning report ended with:
 
@@ -143,8 +143,6 @@ Runtime      : INCOMPLETE OR VERSION DRIFT
 
 Production `ensure-runtime.ps1 -Apply` then rebuilt the temporary private runtime from exact locked dependencies and restored pyserial `3.5`, pywin32 `312`, tkinter and the pywin32 service host.
 
-Decisive markers:
-
 ```text
 D8G_RUNTIME_DRIFT_INTRODUCED pyserial=3.4
 D8G_RUNTIME_DRIFT_DETECTED
@@ -152,14 +150,7 @@ D8G_RUNTIME_DRIFT_REPAIR_OK
 D8G_RUNTIME_DRIFT_FIXTURE_SAFE
 ```
 
-After the fixture test, the real installation remained:
-
-```text
-Detected      : CURRENT
-Recommended   : NONE
-Service       : Running
-vector.ini    : SHA256 unchanged
-```
+The real installation remained `CURRENT / NONE`, service `Running`, with real `vector.ini` SHA256 unchanged.
 
 Result: **D8G.5 RUNTIME VERSION-DRIFT DETECTION + PRODUCTION REPAIR VALIDATED IN FIELD.**
 
@@ -167,32 +158,77 @@ Result: **D8G.5 RUNTIME VERSION-DRIFT DETECTION + PRODUCTION REPAIR VALIDATED IN
 
 ## D8G.6 - LEGACY configuration migration Preview fixture
 
-Status: **IN FIELD VALIDATION**
-Release: `0.8.0-dev.24 / development / D8G`
+Status: **VALIDATED IN FIELD**
+Release tested: `0.8.0-dev.24 / development / D8G`
+Date: 2026-09-07
 
-A new isolated harness is provided:
+`verify-d8g-legacy-preview.ps1` created a temporary representative `config\bridge_multi.ini`, then ran production detection, the production migration planner and full production Setup Preview against that temporary root.
+
+Production detection returned:
 
 ```text
-installer/verify-d8g-legacy-preview.ps1
+Detected    : LEGACY
+Recommended : MIGRATE_REPAIR
+D8G_LEGACY_FIXTURE_DETECTED
 ```
 
-It creates a temporary legacy `config\bridge_multi.ini` containing representative CAT, keying, physical keying and rigctld settings. It then:
-
-1. requires production detection to classify the temporary root as `LEGACY` and require migration;
-2. runs the production legacy migration planner and requires preservation of CAT ports, keying clients, radio keying, rigctld settings and existing com0com pairs;
-3. runs the full production `setup-vector.ps1` in Preview mode against the temporary legacy root;
-4. requires the legacy INI to remain unchanged and requires Preview not to create `vector.ini`;
-5. rechecks the real detector state, real Hub service status and real `vector.ini` SHA256 and requires them to remain unchanged.
-
-Expected decisive markers:
+The migration plan preserved the representative legacy settings:
 
 ```text
-D8G_LEGACY_FIXTURE_DETECTED
+CAT          : COM9, COM15
+Keying       : 2 clients
+Radio keying : COM22 PTT=RIGCTLD CW=RTS
+rigctld      : 127.0.0.1:4532
+com0com      : preserve existing pairs
 D8G_LEGACY_PLAN_OK
+```
+
+Full Setup Preview remained non-destructive and described the transactional `GADXVectorBridge -> GADXVectorHub` handoff without creating `vector.ini` or touching the real station. Final real-state verification returned:
+
+```text
+Detected      : CURRENT
+Recommended   : NONE
+Payload drift : NO
+Service       : Running
+vector.ini    : SHA256 unchanged
+
 D8G_LEGACY_PREVIEW_SAFE
 ```
 
-This fixture validates legacy-file detection and migration planning safely on the current field machine. It does **not** create a real `GADXVectorBridge` Windows service; actual legacy-service handoff remains a clean VM/machine test before RC promotion.
+This validates legacy-file detection and migration planning on the field machine. Actual legacy Windows-service replacement remains reserved for a clean VM/machine before RC promotion.
+
+Result: **D8G.6 LEGACY CONFIGURATION MIGRATION PREVIEW VALIDATED IN FIELD.**
+
+---
+
+## D8G.7 - Repeated repair / idempotence on field station
+
+Status: **IN FIELD VALIDATION**
+Release: `0.8.0-dev.25 / development / D8G`
+
+This scenario intentionally exercises one real D7 repair transaction on the already validated field station, followed by a second detection pass proving the repaired state is idempotent.
+
+The controlled drift target remains:
+
+```text
+C:\Ham\GADX-Vector\tools\port_manager.py
+```
+
+It is suitable because the running Hub does not load this file. Before Apply, the station must be in RX, rigctld PTT must read `0`, and the RF amplifier should be disabled/off as an additional physical precaution.
+
+Expected sequence:
+
+1. refresh to exact `0.8.0-dev.25` installer source;
+2. save SHA256 of `vector.ini` and inventory of existing com0com pairs;
+3. introduce harmless payload drift only in `tools\port_manager.py`;
+4. require Preview `CURRENT / REPAIR / Payload drift YES` and the D7 safety gate;
+5. run production `setup-vector.ps1 -Apply` while radio is in RX and amplifier is disabled;
+6. require D7 transaction success, preserved `vector.ini`, unchanged com0com pairs, `GADXVectorHub Running / delayed-auto`, and PTT safe state OFF;
+7. run Setup again and require `CURRENT / NONE / Payload drift NO`;
+8. run D8F Health Report and require `INSTALLATION STATUS : READY`;
+9. compare `vector.ini` SHA256 and com0com pair inventory with pre-test snapshots.
+
+This scenario proves that a real repair returns the installation to a stable state where repeating Setup becomes a no-op rather than triggering another repair.
 
 ---
 
@@ -204,9 +240,9 @@ This fixture validates legacy-file detection and migration planning safely on th
 | CURRENT healthy | **Validated** | D8G.1 ZIP integrity + package-lock Preview on field station |
 | CURRENT payload drift | **Validated** | D8G.2 controlled Port Manager drift + exact restore |
 | CURRENT broken/incomplete | **Validated** | D8G.3 isolated production Preview fixture |
-| LEGACY GADXVectorBridge | In validation | D8G.6 legacy INI migration Preview fixture; real service handoff still requires VM |
+| LEGACY GADXVectorBridge | Partial | D8G.6 legacy INI migration Preview validated; real service handoff still requires VM |
 | Runtime absent | **Validated** | D8G.4 isolated production runtime creation |
 | Runtime incomplete/version drift | **Validated** | D8G.5 isolated pyserial version-drift + production repair fixture |
 | Reboot after COM changes | Pending | Requires COM provisioning test |
-| Repeated repair/idempotence | Pending | Requires D8G package repeat test |
+| Repeated repair/idempotence | In validation | D8G.7 real controlled repair on field station |
 | Induced failure + rollback | Pending | Requires controlled failure test |
