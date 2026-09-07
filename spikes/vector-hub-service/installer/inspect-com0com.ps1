@@ -132,14 +132,22 @@ foreach ($path in $installerCandidates) {
     }) | Out-Null
 }
 
+# Windows PowerShell 5.1 can throw "Argument types do not match" when a
+# System.Collections.Generic.List[object] is wrapped with @($list) inside an
+# ordered hashtable. Materialize each list explicitly as a normal object array.
+$uninstallArray = $uninstallEntries.ToArray()
+$driverArray = $drivers.ToArray()
+$installedFileArray = $installedFiles.ToArray()
+$bundledInstallerArray = $bundledInstallers.ToArray()
+
 $result = [ordered]@{
     format = 1
     setupc = $setupc
     install_directory = $installDir
-    uninstall_entries = @($uninstallEntries)
-    signed_drivers = @($drivers)
-    installed_binary_files = @($installedFiles)
-    bundled_installer_candidates = @($bundledInstallers)
+    uninstall_entries = $uninstallArray
+    signed_drivers = $driverArray
+    installed_binary_files = $installedFileArray
+    bundled_installer_candidates = $bundledInstallerArray
 }
 
 Write-Host ""
