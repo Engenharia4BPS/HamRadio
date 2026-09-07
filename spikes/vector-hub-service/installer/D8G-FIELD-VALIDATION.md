@@ -150,33 +150,94 @@ Result: **D8G.2 CURRENT PAYLOAD-DRIFT DETECTION + SAFE RESTORE VALIDATED IN FIEL
 
 ## D8G.3 - CURRENT broken/incomplete Preview fixture
 
-Status: **IN FIELD VALIDATION**
-Release: `0.8.0-dev.21 / development / D8G`
+Status: **VALIDATED IN FIELD**
+Release tested: `0.8.0-dev.21 / development / D8G`
+Date: 2026-09-07
 
-The next scenario validates `CURRENT broken/incomplete` without damaging the field installation.
-
-A new isolated test harness is provided:
+The isolated harness:
 
 ```text
 installer/verify-d8g-broken-preview.ps1
 ```
 
-The harness creates a temporary install root containing only `app\vector_hub.py`. Service/config/tools/runtime are intentionally absent. It then invokes the real production `setup-vector.ps1` in Preview mode against that temporary fixture.
+created a temporary install root containing only `app\vector_hub.py`. Service/config/tools/runtime were intentionally absent. It invoked the real production `setup-vector.ps1` in Preview mode against that fixture.
 
-Acceptance:
+Production detection correctly reported:
 
 ```text
 Detected     : BROKEN
 Mode         : REPAIR
-PREVIEW ONLY
-Config       : MISSING
+PREVIEW ONLY - orchestrator will not modify the machine.
+```
+
+The runtime preview correctly detected the temporary runtime as missing while leaving the system com0com untouched:
+
+```text
+Runtime      : MISSING
+com0com      : OK - locked 3.0.0.0
+PREVIEW ONLY - no changes were made.
+```
+
+The service-migration Preview also identified the incomplete state:
+
+```text
+Python       : MISSING - will be supplied by runtime ensure before Apply
+Config       : MISSING - must exist before service transaction
+PREVIEW ONLY - no files or services were changed.
+```
+
+After the fixture Preview, the harness rechecked the real field installation and proved it remained unchanged:
+
+```text
+Detected      : CURRENT
+Recommended   : NONE
+Payload drift : NO
+Service       : Running
+vector.ini    : SHA256 unchanged
+
 D8G_BROKEN_FIXTURE_DETECTED
 D8G_BROKEN_PREVIEW_SAFE
 ```
 
-The harness also snapshots the real installation detector state, real `GADXVectorHub` service status and real `vector.ini` SHA256 before the fixture Preview, then requires all of them to remain unchanged afterward. The temporary fixture is removed at the end.
+Result: **D8G.3 CURRENT BROKEN/INCOMPLETE PREVIEW DETECTION VALIDATED IN FIELD.**
 
-No Apply is performed and no real service, COM pair, runtime, configuration or radio state may change during this test.
+---
+
+## D8G.4 - Runtime absent / isolated production creation
+
+Status: **IN FIELD VALIDATION**
+Next release: `0.8.0-dev.22 / development / D8G`
+
+The runtime-absent scenario reuses the already production-facing validation harness:
+
+```text
+installer/verify-production-runtime-lock.ps1
+```
+
+The harness creates a completely temporary Vector install root with no runtime, calls the real production `ensure-runtime.ps1 -Apply` against that temporary root, then validates the resulting private Python runtime and removes the fixture.
+
+Safety conditions:
+
+- system com0com must already be present, so the test never installs/removes virtual serial drivers or COM pairs;
+- no Vector Windows service is registered;
+- no real `vector.ini` is touched;
+- no real application/service/tools payload is changed;
+- only the temporary runtime directory is created and deleted.
+
+Acceptance:
+
+```text
+Runtime      : MISSING
+Creating isolated Vector runtime ...
+LOCKED_PYTHON_PACKAGES_INSTALLED
+PYWIN32_SERVICE_HOST_OK
+RUNTIME_DEPENDENCY_LOCK_OK
+PRODUCTION_RUNTIME_IMPORTS_OK
+PRODUCTION_RUNTIME_SERVICE_HOST_OK
+PRODUCTION_RUNTIME_LOCK_TEST_OK
+```
+
+This scenario must be repeated on the current D8G generation even though the same harness was previously used during D8D dependency-lock development.
 
 ---
 
@@ -187,9 +248,9 @@ No Apply is performed and no real service, COM pair, runtime, configuration or r
 | CLEAN Windows 10/11 | Pending | Requires clean VM/machine, including com0com driver test |
 | CURRENT healthy | **Validated** | D8G.1 ZIP integrity + package-lock Preview on field station |
 | CURRENT payload drift | **Validated** | D8G.2 controlled Port Manager drift + exact restore |
-| CURRENT broken/incomplete | In validation | D8G.3 isolated production Preview fixture |
+| CURRENT broken/incomplete | **Validated** | D8G.3 isolated production Preview fixture |
 | LEGACY GADXVectorBridge | Pending | Requires legacy fixture/VM |
-| Runtime absent | Pending | Requires isolated/clean test root or VM |
+| Runtime absent | In validation | D8G.4 isolated production runtime creation |
 | Runtime incomplete/version drift | Pending | Requires controlled fixture |
 | Reboot after COM changes | Pending | Requires COM provisioning test |
 | Repeated repair/idempotence | Pending | Requires D8G package repeat test |
