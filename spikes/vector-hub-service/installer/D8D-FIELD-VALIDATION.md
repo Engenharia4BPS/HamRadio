@@ -102,12 +102,15 @@ This preserves release immutability while providing a deliberate development/upd
 
 ## D8D.3 - Reproducible dependency lock
 
-Status: **D8D.3A IN FIELD VALIDATION**
-Release: `0.8.0-dev.6 / development / D8D.3`
+### D8D.3A - Dependency artifact lock
 
-D8D.3A introduces `dependency-lock.json` and `verify-dependency-lock.ps1`.
+Status: **VALIDATED IN FIELD**
+Release tested: `0.8.0-dev.6 / development / D8D.3`
+Date: 2026-09-06
 
-The initial lock pins these downloadable artifacts by version, size and SHA256:
+D8D.3A introduced `dependency-lock.json` and `verify-dependency-lock.ps1`.
+
+The lock pins these downloadable artifacts by version, size and SHA256:
 
 ```text
 Python 3.10.11 x64
@@ -115,22 +118,49 @@ pyserial 3.5 wheel
 pywin32 312 cp310 win_amd64 wheel
 ```
 
-The validator has two modes:
-
-```text
-structure-only
-online hash verification
-```
-
-Online validation downloads into a temporary directory only, compares exact size + SHA256, then deletes the temporary files. It does not touch the Vector runtime, service, COM configuration or radio.
-
-com0com remains explicitly marked as not-yet-pinned in D8D.3A. Its redistribution/source/hash policy will be handled separately in D8D.3B instead of silently treating the currently installed copy as reproducible.
-
-Acceptance for D8D.3A:
+The validator was exercised in both modes and passed:
 
 ```text
 DEPENDENCY_LOCK_STRUCTURE_OK
 DEPENDENCY_LOCK_ONLINE_OK
 ```
 
-Only after that field test will `ensure-runtime.ps1` be changed to consume the lock for actual runtime installation/repair.
+Online validation downloaded only to a temporary directory, compared exact size + SHA256, and removed the temporary files. No Vector runtime, service, COM configuration or radio state was changed.
+
+Result: **D8D.3A DEPENDENCY ARTIFACT LOCK VALIDATED IN FIELD.**
+
+com0com remains explicitly marked as not-yet-pinned. Its redistribution/source/hash policy remains a separate D8D.3B task.
+
+### D8D.3A.2 - Locked wheel installation path
+
+Status: **IN FIELD VALIDATION**
+Release: `0.8.0-dev.7 / development / D8D.3`
+
+Before changing production `ensure-runtime.ps1`, the exact locked wheel installation path is being validated in isolation.
+
+New artifacts:
+
+```text
+install-locked-python-packages.ps1
+verify-locked-python-install.ps1
+```
+
+The installer helper:
+
+- reads only wheel entries from `dependency-lock.json`;
+- downloads exact locked wheel URLs;
+- rejects size or SHA256 mismatch;
+- installs with `pip --no-index --no-deps` from the verified local wheel files;
+- can install to an isolated target directory for field testing without modifying the Vector runtime.
+
+The isolated verifier installs into a temporary site-packages directory, loads that directory with `site.addsitedir`, imports pyserial + pywin32 service modules, and verifies package versions `3.5` and `312`.
+
+Acceptance:
+
+```text
+LOCKED_PYTHON_PACKAGES_INSTALLED
+LOCKED_PYTHON_IMPORTS_OK
+LOCKED_PYTHON_INSTALL_TEST_OK
+```
+
+Only after this passes will production `ensure-runtime.ps1` be switched from version-only PyPI resolution to this verified locked-wheel path.
