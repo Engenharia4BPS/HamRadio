@@ -4,7 +4,7 @@
 
 Date: 2026-09-07
 Release baseline: `0.8.0-dev.18 / development / D8F`
-Current D8G release: `0.8.0-dev.19 / development / D8G`
+Current D8G release: `0.8.0-dev.21 / development / D8G`
 
 D8F is field-validated on the current station. The main GADX Vector Setup GUI exposes both Port Manager and Health Report. The read-only commissioning report ended with:
 
@@ -97,22 +97,21 @@ Result: **D8G.1 PACKAGED CURRENT-HEALTHY BASELINE VALIDATED IN FIELD.**
 
 ---
 
-## D8G.2 - Packaged CURRENT payload-drift detection
+## D8G.2 - CURRENT payload-drift detection
 
-Status: **IN FIELD VALIDATION**
-Next release: `0.8.0-dev.20 / development / D8G`
+Status: **VALIDATED IN FIELD**
+Release tested: `0.8.0-dev.20 / development / D8G`
+Date: 2026-09-07
 
-Purpose: repeat the earlier D8C drift behavior using the D8G product generation and prove that a harmless installed auxiliary-file drift is detected as `CURRENT / REPAIR / Payload drift YES` without touching the running Hub.
-
-The selected controlled drift target is:
+A controlled drift was introduced only in:
 
 ```text
 C:\Ham\GADX-Vector\tools\port_manager.py
 ```
 
-This file is part of payload-drift detection but is not loaded by the running Hub service, making it suitable for a non-radio-impacting detector test when the Port Manager itself is closed.
+The Port Manager was closed, so the running Hub service did not load or depend on the modified file.
 
-Acceptance before any repair Apply:
+Production Preview correctly reported:
 
 ```text
 Detected     : CURRENT
@@ -120,9 +119,24 @@ Mode         : REPAIR
 Payload drift: YES - installed files differ from current installer payload
 ```
 
-Preview must also show the D7 safety gate for a future Apply while leaving the currently running Hub untouched during Preview.
+The D7 safety gate was also exposed before any possible Apply:
 
-After the detector/Preview evidence is captured, the exact packaged payload copy must be restored and the machine must return to:
+```text
+On Apply, GADXVectorHub will be set Disabled and forced Stopped BEFORE runtime/download/update work.
+Current service status: Running
+```
+
+No `-Apply` was used. Runtime/com0com Preview remained healthy and D7 described the planned transaction without modifying service, configuration, COM pairs or radio state.
+
+The exact original `port_manager.py` was restored from the pre-test backup. SHA256 comparison against the current installer payload returned identical hashes:
+
+```text
+Installed : D4374055DA7E56D7219A74875FE7E44F20D684C2769E30EDC27FE14A7E9647CE
+Payload   : D4374055DA7E56D7219A74875FE7E44F20D684C2769E30EDC27FE14A7E9647CE
+Match     : True
+```
+
+A final production Preview returned the real machine to:
 
 ```text
 Detected     : CURRENT
@@ -130,7 +144,39 @@ Mode         : NONE
 Payload drift: NO
 ```
 
-No `-Apply` repair is required for this detector-only D8G.2 test.
+Result: **D8G.2 CURRENT PAYLOAD-DRIFT DETECTION + SAFE RESTORE VALIDATED IN FIELD.**
+
+---
+
+## D8G.3 - CURRENT broken/incomplete Preview fixture
+
+Status: **IN FIELD VALIDATION**
+Release: `0.8.0-dev.21 / development / D8G`
+
+The next scenario validates `CURRENT broken/incomplete` without damaging the field installation.
+
+A new isolated test harness is provided:
+
+```text
+installer/verify-d8g-broken-preview.ps1
+```
+
+The harness creates a temporary install root containing only `app\vector_hub.py`. Service/config/tools/runtime are intentionally absent. It then invokes the real production `setup-vector.ps1` in Preview mode against that temporary fixture.
+
+Acceptance:
+
+```text
+Detected     : BROKEN
+Mode         : REPAIR
+PREVIEW ONLY
+Config       : MISSING
+D8G_BROKEN_FIXTURE_DETECTED
+D8G_BROKEN_PREVIEW_SAFE
+```
+
+The harness also snapshots the real installation detector state, real `GADXVectorHub` service status and real `vector.ini` SHA256 before the fixture Preview, then requires all of them to remain unchanged afterward. The temporary fixture is removed at the end.
+
+No Apply is performed and no real service, COM pair, runtime, configuration or radio state may change during this test.
 
 ---
 
@@ -140,8 +186,8 @@ No `-Apply` repair is required for this detector-only D8G.2 test.
 | --- | --- | --- |
 | CLEAN Windows 10/11 | Pending | Requires clean VM/machine, including com0com driver test |
 | CURRENT healthy | **Validated** | D8G.1 ZIP integrity + package-lock Preview on field station |
-| CURRENT payload drift | In validation | D8G.2 controlled Port Manager payload drift |
-| CURRENT broken/incomplete | Pending | Requires controlled test state |
+| CURRENT payload drift | **Validated** | D8G.2 controlled Port Manager drift + exact restore |
+| CURRENT broken/incomplete | In validation | D8G.3 isolated production Preview fixture |
 | LEGACY GADXVectorBridge | Pending | Requires legacy fixture/VM |
 | Runtime absent | Pending | Requires isolated/clean test root or VM |
 | Runtime incomplete/version drift | Pending | Requires controlled fixture |
