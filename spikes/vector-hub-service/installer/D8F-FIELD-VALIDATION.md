@@ -89,10 +89,11 @@ Result: **D8F.1 READ-ONLY CURRENT-STATE COMMISSIONING REPORT VALIDATED IN FIELD.
 
 ## D8F.2 - Health Report integrated into GADX Vector Setup
 
-Status: **IN FIELD VALIDATION**
-Release: `0.8.0-dev.18 / development / D8F`
+Status: **VALIDATED IN FIELD**
+Release tested: `0.8.0-dev.18 / development / D8F`
+Date: 2026-09-07
 
-The main `setup-launcher.ps1` now exposes the validated commissioning report through a `Health Report` button.
+The main `setup-launcher.ps1` exposes the validated commissioning report through a `Health Report` button.
 
 Behavior:
 
@@ -104,26 +105,50 @@ Behavior:
 - the Port Manager button remains separate;
 - the existing D1-D7 backend remains unchanged.
 
-Field acceptance for D8F.2:
+Field execution showed:
 
 ```text
 Release        0.8.0-dev.18 / development / D8F
 Detected       CURRENT
 Recommended    NONE
 Payload drift  NO
+Service        Running
+Runtime        OK
+com0com        OK
 ```
 
-The main button row should contain:
+The main button row contained:
 
 ```text
 Health Report | Port Manager | Refresh | Run Preview | Apply | Close
 ```
 
-For the current healthy station, clicking `Health Report` should show the validated D8F report inside the Setup window and end with:
+Clicking `Health Report` displayed the complete D8F report inside the Setup window, including:
 
 ```text
+Hub process    : OK - PID 2464
+CAT ports      : COM101, COM103, COM105
+Keying ports   : COM102, COM104, COM106
+Radio keying   : COM22 @ 9600 PTT=RIGCTLD CW=RTS
+rigctld        : 127.0.0.1:4532 OK freq=7074000
+Hub protocol   : OK freq=7074000 mode=PKTUSB
+Hub ready mark : INFO - found in log history
+Rig poll hist  : WARN - 498 errors in last 500 log lines; current probes decide readiness
+PTT safe state : OK - t -> 0
+Reboot pending : False
+
 INSTALLATION STATUS : READY
 D8F_COMMISSIONING_REPORT_OK
 ```
 
-`Apply` must remain disabled for `Recommended: NONE`.
+`Apply` remained disabled for `Recommended: NONE`. Opening the health report made no configuration, service, COM or radio changes.
+
+Result: **D8F.2 HEALTH REPORT GUI INTEGRATION VALIDATED IN FIELD.**
+
+---
+
+## D8F result
+
+**D8F COMMISSIONING + FINAL HEALTH REPORT VALIDATED IN FIELD.**
+
+The current product flow now exposes both Port Manager and final health/commissioning from the main GADX Vector Setup GUI without requiring the operator to know internal PowerShell commands.
