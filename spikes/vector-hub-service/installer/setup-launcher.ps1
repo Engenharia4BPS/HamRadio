@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 $InstallRoot = [System.IO.Path]::GetFullPath($InstallRoot)
 $InstallerRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SetupScript = Join-Path $InstallerRoot "setup-vector.ps1"
+$PortManagerLauncher = Join-Path $InstallerRoot "launch-port-manager.ps1"
 
 function Test-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -58,6 +59,12 @@ function Runtime-Label($runtime) {
     if (-not $runtime.python_exe) { return "MISSING" }
     if ($runtime.tkinter -and $runtime.pyserial -and $runtime.pywin32) { return "OK" }
     return "INCOMPLETE"
+}
+
+function Test-PortManagerReady {
+    if (-not (Test-Path $PortManagerLauncher -PathType Leaf)) { return $false }
+    if (-not $script:currentState) { return $false }
+    return [bool]$script:currentState.detector.runtime.python_exe
 }
 
 $form = New-Object System.Windows.Forms.Form
@@ -137,6 +144,14 @@ $statusBar.Location = New-Object System.Drawing.Point(22,607)
 $statusBar.Anchor = 'Bottom,Left'
 $form.Controls.Add($statusBar)
 
+$portManagerButton = New-Object System.Windows.Forms.Button
+$portManagerButton.Text = "Port Manager"
+$portManagerButton.Size = New-Object System.Drawing.Size(130,32)
+$portManagerButton.Location = New-Object System.Drawing.Point(292,615)
+$portManagerButton.Anchor = 'Bottom,Right'
+$portManagerButton.Enabled = $false
+$form.Controls.Add($portManagerButton)
+
 $refreshButton = New-Object System.Windows.Forms.Button
 $refreshButton.Text = "Refresh"
 $refreshButton.Size = New-Object System.Drawing.Size(100,32)
@@ -171,6 +186,7 @@ $script:previewPassed = $false
 
 function Set-Busy([bool]$busy,[string]$message) {
     $form.UseWaitCursor = $busy
+    $portManagerButton.Enabled = $false
     $refreshButton.Enabled = -not $busy
     $previewButton.Enabled = -not $busy
     $closeButton.Enabled = -not $busy
@@ -224,11 +240,32 @@ function Refresh-State {
     }
     finally {
         $form.UseWaitCursor = $false
+        $portManagerButton.Enabled = (Test-PortManagerReady)
         $refreshButton.Enabled = $true
         $previewButton.Enabled = $true
         $closeButton.Enabled = $true
     }
 }
+
+$portManagerButton.Add_Click({
+    try {
+        if (-not (Test-PortManagerReady)) {
+            throw "Port Manager is not available until the Vector private runtime is ready."
+        }
+        $arguments = @(
+            '-NoProfile',
+            '-ExecutionPolicy','Bypass',
+            '-File',("`"{0}`"" -f $PortManagerLauncher),
+            '-InstallRoot',("`"{0}`"" -f $InstallRoot)
+        )
+        Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList $arguments | Out-Null
+        $statusBar.Text = "Port Manager opened in a separate window."
+    }
+    catch {
+        $statusBar.Text = "Unable to open Port Manager."
+        [System.Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,"GADX Vector Setup",'OK','Error') | Out-Null
+    }
+})
 
 $refreshButton.Add_Click({ Refresh-State })
 
@@ -254,6 +291,7 @@ $previewButton.Add_Click({
     }
     finally {
         $form.UseWaitCursor = $false
+        $portManagerButton.Enabled = (Test-PortManagerReady)
         $refreshButton.Enabled = $true
         $previewButton.Enabled = $true
         $closeButton.Enabled = $true
@@ -293,6 +331,7 @@ $applyButton.Add_Click({
     }
     finally {
         $form.UseWaitCursor = $false
+        $portManagerButton.Enabled = (Test-PortManagerReady)
         $refreshButton.Enabled = $true
         $previewButton.Enabled = $true
         $closeButton.Enabled = $true
