@@ -176,4 +176,37 @@ Two subsequent PowerShell `CommandNotFoundException` messages were unrelated to 
 
 Result: **D8D.3A.2 LOCKED PYTHON INSTALLATION PATH VALIDATED IN FIELD.**
 
-Next production step: switch `ensure-runtime.ps1` from version-only PyPI resolution to the verified locked-wheel path while preserving the D7 pywin32 service-host staging, safety gate and rollback behavior.
+### D8D.3A.3 - Production ensure-runtime consumes lock
+
+Status: **IN FIELD VALIDATION**
+Release: `0.8.0-dev.8 / development / D8D.3`
+
+Production `ensure-runtime.ps1` now consumes `dependency-lock.json` directly.
+
+Changes:
+
+- runtime health requires exact Python `3.10.11`, pyserial `3.5` and pywin32 `312`;
+- downloaded or bundled Python installer must match the locked size + SHA256 before execution;
+- compatible existing Python reuse is restricted to exact Python `3.10.11` x64 + Tcl/Tk;
+- pyserial/pywin32 installation uses only verified locked wheels via `install-locked-python-packages.ps1`;
+- pywin32 service-host repair also reinstalls only from the locked pywin32 wheel;
+- successful production runtime preparation ends with `RUNTIME_DEPENDENCY_LOCK_OK`.
+
+An isolated production-path validator was added:
+
+```text
+verify-production-runtime-lock.ps1
+```
+
+It requires com0com to already be installed, creates only a temporary Vector install root, invokes the real production `ensure-runtime.ps1 -Apply`, validates exact interpreter/package versions plus `pythonservice.exe`, `pywintypes310.dll` and `pythoncom310.dll`, and deletes the temporary runtime afterward.
+
+It does not register/start/stop the Vector service and does not modify Vector configuration or COM pairs.
+
+Acceptance:
+
+```text
+RUNTIME_DEPENDENCY_LOCK_OK
+PRODUCTION_RUNTIME_IMPORTS_OK
+PRODUCTION_RUNTIME_SERVICE_HOST_OK
+PRODUCTION_RUNTIME_LOCK_TEST_OK
+```
