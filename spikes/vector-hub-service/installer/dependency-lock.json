@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "product": "GADX Vector",
+  "purpose": "D8D reproducible dependency lock",
+  "python": {
+    "version": "3.10.11",
+    "architecture": "x64",
+    "filename": "python-3.10.11-amd64.exe",
+    "url": "https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe",
+    "size": 29037240,
+    "sha256": "d8dede5005564b408ba50317108b765ed9c3c510342a598f9fd42681cbe0648b"
+  },
+  "python_packages": [
+    {
+      "name": "pyserial",
+      "version": "3.5",
+      "filename": "pyserial-3.5-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/07/bc/587a445451b253b285629263eb51c2d8e9bcea4fc97826266d186f96f558/pyserial-3.5-py2.py3-none-any.whl",
+      "size": 90585,
+      "sha256": "c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0"
+    },
+    {
+      "name": "pywin32",
+      "version": "312",
+      "python_tag": "cp310",
+      "architecture": "win_amd64",
+      "filename": "pywin32-312-cp310-cp310-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/33/b1/7afc96d041d982c27bc2df6f853d43f01fd273e3d39d04be3647ddeb533d/pywin32-312-cp310-cp310-win_amd64.whl",
+      "size": 6926780,
+      "sha256": "5dbc35d2b5320dc07f25fa31269cfb767471002b17de5eb067d03da68c7cb2db"
+    }
+  ],
+  "com0com": {
+    "mode": "installed-or-bundled",
+    "required_executable": "setupc.exe",
+    "pinned_distribution": false,
+    "note": "D8D.3A locks Python and Python wheels first. com0com distribution/hash pinning remains a separate D8D.3B task because redistribution/source policy must be finalized."
+  }
+}
