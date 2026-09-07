@@ -105,6 +105,50 @@ function Test-Rigctld([string]$HostName,[int]$PortNumber,[string]$Command) {
     }
 }
 
+function Invoke-RigctldExtended([string]$HostName,[int]$PortNumber,[string]$LongCommand) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $iar = $client.BeginConnect($HostName,$PortNumber,$null,$null)
+        if (-not $iar.AsyncWaitHandle.WaitOne(2000,$false)) { throw "connection timeout" }
+        $client.EndConnect($iar)
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = 2000
+        $stream.WriteTimeout = 2000
+        $writer = New-Object System.IO.StreamWriter($stream,[System.Text.Encoding]::ASCII,1024,$true)
+        $writer.NewLine = "`n"
+        $writer.AutoFlush = $true
+        $reader = New-Object System.IO.StreamReader($stream,[System.Text.Encoding]::ASCII,$false,1024,$true)
+        $writer.WriteLine("+\$LongCommand")
+        $records = New-Object System.Collections.Generic.List[string]
+        while ($true) {
+            $line = $reader.ReadLine()
+            if ($null -eq $line) { throw "rigctld closed connection before RPRT" }
+            $line = $line.Trim()
+            [void]$records.Add($line)
+            if ($line -match '^RPRT\s+(-?\d+)$') {
+                $code = [int]$Matches[1]
+                return [pscustomobject]@{
+                    ok = ($code -eq 0)
+                    code = $code
+                    records = @($records.ToArray())
+                }
+            }
+        }
+    }
+    finally {
+        $client.Close()
+    }
+}
+
+function Get-ExtendedValue($Result,[string]$Name) {
+    foreach ($line in @($Result.records)) {
+        if ($line -match ('^' + [regex]::Escape($Name) + ':\s*(.*)$')) {
+            return $Matches[1].Trim()
+        }
+    }
+    return $null
+}
+
 function Test-LockedRuntime($Lock) {
     if (-not (Test-Path $PythonExe -PathType Leaf)) { return $false }
     $pythonVersion = [string]$Lock.python.version
@@ -132,6 +176,18 @@ function Get-LatestBackup([string]$Root) {
     $item = Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($item) { return $item.FullName }
     return $null
+}
+
+function Get-HubProcess {
+    try {
+        $rootPattern = [regex]::Escape($InstallRoot)
+        return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.CommandLine -and
+            [string]$_.CommandLine -match '(?i)vector_hub\.py' -and
+            [string]$_.CommandLine -match $rootPattern
+        })
+    }
+    catch { return @() }
 }
 
 Assert-Administrator
@@ -162,6 +218,10 @@ try {
     if ($svcCim) { $serviceStartMode = [string]$svcCim.StartMode }
 } catch {}
 
+$hubProcesses = @(Get-HubProcess)
+$hubProcessRunning = ($hubProcesses.Count -gt 0)
+$hubProcessIds = @($hubProcesses | ForEach-Object { [int]$_.ProcessId })
+
 $catPorts = if ($vectorIniOk) { Get-CatPorts $VectorIni } else { @() }
 $keyingEntries = if ($vectorIniOk) { Get-KeyingEntries $VectorIni } else { @() }
 $keyingPorts = @($keyingEntries | ForEach-Object { $_.port } | Where-Object { $_ } | Select-Object -Unique)
@@ -184,6 +244,27 @@ if ($rigHost -and $rigPort -gt 0) {
     } catch { $rigFrequency = $_.Exception.Message }
 }
 
+$hubProtocolOk = $false
+$hubProtocolFrequency = $null
+$hubProtocolMode = $null
+$hubProtocolDetail = $null
+if ($rigHost -and $rigPort -gt 0) {
+    try {
+        $extendedFreq = Invoke-RigctldExtended $rigHost $rigPort "get_freq"
+        $extendedMode = Invoke-RigctldExtended $rigHost $rigPort "get_mode"
+        $hubProtocolFrequency = Get-ExtendedValue $extendedFreq "Frequency"
+        $hubProtocolMode = Get-ExtendedValue $extendedMode "Mode"
+        $hubProtocolOk = (
+            [bool]$extendedFreq.ok -and
+            [bool]$extendedMode.ok -and
+            $hubProtocolFrequency -match '^\d+(\.\d+)?$' -and
+            [bool]$hubProtocolMode
+        )
+        $hubProtocolDetail = "get_freq RPRT=$($extendedFreq.code); get_mode RPRT=$($extendedMode.code)"
+    }
+    catch { $hubProtocolDetail = $_.Exception.Message }
+}
+
 $pttResponse = $null
 $pttSafe = $false
 if ($pttLine -eq 'RIGCTLD' -and $rigHost -and $rigPort -gt 0) {
@@ -195,11 +276,16 @@ if ($pttLine -eq 'RIGCTLD' -and $rigHost -and $rigPort -gt 0) {
     $pttResponse = "read-only probe not available for PTT=$pttLine"
 }
 
-$hubReady = $false
+$hubReadyMarker = $null
+$recentRigPollErrors = 0
+$lastLogLine = $null
 if (Test-Path $HubLog -PathType Leaf) {
     try {
-        $tail = @(Get-Content -LiteralPath $HubLog -Tail 200 -ErrorAction SilentlyContinue)
-        $hubReady = (($tail -join "`n") -match 'Vector Hub ready')
+        $readyMatch = Select-String -LiteralPath $HubLog -Pattern "Vector Hub ready" -SimpleMatch -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if ($readyMatch) { $hubReadyMarker = [string]$readyMatch.Line }
+        $tail = @(Get-Content -LiteralPath $HubLog -Tail 500 -ErrorAction SilentlyContinue)
+        $recentRigPollErrors = @($tail | Where-Object { $_ -match 'ERROR rigctld poll failed' }).Count
+        if ($tail.Count -gt 0) { $lastLogLine = [string]$tail[$tail.Count - 1] }
     } catch {}
 }
 
@@ -214,14 +300,15 @@ $ready = (
     $com0comOk -and
     $vectorIniOk -and
     $serviceRunning -and
-    $hubReady -and
+    $hubProcessRunning -and
     $rigOk -and
+    $hubProtocolOk -and
     $pttSafe -and
     -not $rebootPending
 )
 
 $result = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     product = "GADX Vector"
     release = $releaseLabel
     install_root = $InstallRoot
@@ -234,6 +321,10 @@ $result = [ordered]@{
     service = [ordered]@{
         status = $(if ($svc) { [string]$svc.Status } else { "not installed" })
         start_mode = $serviceStartMode
+    }
+    hub_process = [ordered]@{
+        running = [bool]$hubProcessRunning
+        process_ids = @($hubProcessIds)
     }
     cat_ports = @($catPorts)
     keying_ports = @($keyingPorts)
@@ -250,7 +341,17 @@ $result = [ordered]@{
         frequency_response = $rigFrequency
         ok = [bool]$rigOk
     }
-    hub_ready_log = [bool]$hubReady
+    hub_protocol = [ordered]@{
+        ok = [bool]$hubProtocolOk
+        frequency = $hubProtocolFrequency
+        mode = $hubProtocolMode
+        detail = $hubProtocolDetail
+    }
+    hub_log = [ordered]@{
+        last_ready_marker = $hubReadyMarker
+        recent_poll_errors_in_last_500_lines = [int]$recentRigPollErrors
+        last_line = $lastLogLine
+    }
     ptt_safe = [ordered]@{
         ok = [bool]$pttSafe
         response = $pttResponse
@@ -277,11 +378,14 @@ Write-Host "Runtime        : $(if ($runtimeOk) { 'OK - dependency lock' } else {
 Write-Host "com0com        : $(if ($com0comOk) { "OK - locked $([string]$lock.com0com.version)" } else { 'FAIL' })"
 Write-Host "vector.ini     : $(if ($vectorIniOk) { 'OK' } else { 'MISSING' })"
 Write-Host "Service        : $(if ($svc) { [string]$svc.Status } else { 'not installed' }) / $serviceStartMode"
+Write-Host "Hub process    : $(if ($hubProcessRunning) { "OK - PID $($hubProcessIds -join ',')" } else { 'FAIL - vector_hub.py process not found' })"
 Write-Host "CAT ports      : $(if ($catPorts.Count) { $catPorts -join ', ' } else { 'none' })"
 Write-Host "Keying ports   : $(if ($keyingPorts.Count) { $keyingPorts -join ', ' } else { 'none' })"
 Write-Host "Radio keying   : $radioPort @ $radioBaud PTT=$pttLine CW=$cwLine"
 Write-Host "rigctld        : $rigHost`:$rigPort $(if ($rigOk) { "OK freq=$rigFrequency" } else { "FAIL response=$rigFrequency" })"
-Write-Host "Hub ready log  : $(if ($hubReady) { 'OK' } else { 'FAIL' })"
+Write-Host "Hub protocol   : $(if ($hubProtocolOk) { "OK freq=$hubProtocolFrequency mode=$hubProtocolMode" } else { "FAIL - $hubProtocolDetail" })"
+Write-Host "Hub ready mark : $(if ($hubReadyMarker) { 'INFO - found in log history' } else { 'INFO - not present in current log file' })"
+Write-Host "Rig poll hist  : $(if ($recentRigPollErrors -gt 0) { "WARN - $recentRigPollErrors errors in last 500 log lines; current probes decide readiness" } else { 'OK - no errors in last 500 log lines' })"
 Write-Host "PTT safe state : $(if ($pttSafe) { "OK - t -> $pttResponse" } else { "FAIL - $pttResponse" })"
 Write-Host "Latest backup  : $(if ($latestBackup) { $latestBackup } else { 'none' })"
 Write-Host "Reboot pending : $rebootPending"
