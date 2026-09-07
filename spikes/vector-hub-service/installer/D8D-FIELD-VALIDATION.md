@@ -133,12 +133,13 @@ com0com remains explicitly marked as not-yet-pinned. Its redistribution/source/h
 
 ### D8D.3A.2 - Locked wheel installation path
 
-Status: **IN FIELD VALIDATION**
+Status: **VALIDATED IN FIELD**
 Release: `0.8.0-dev.7 / development / D8D.3`
+Date: 2026-09-06
 
-Before changing production `ensure-runtime.ps1`, the exact locked wheel installation path is being validated in isolation.
+Before changing production `ensure-runtime.ps1`, the exact locked wheel installation path was validated in isolation.
 
-New artifacts:
+Artifacts:
 
 ```text
 install-locked-python-packages.ps1
@@ -153,14 +154,26 @@ The installer helper:
 - installs with `pip --no-index --no-deps` from the verified local wheel files;
 - can install to an isolated target directory for field testing without modifying the Vector runtime.
 
-The isolated verifier installs into a temporary site-packages directory, loads that directory with `site.addsitedir`, imports pyserial + pywin32 service modules, and verifies package versions `3.5` and `312`.
+The isolated verifier installed into a temporary site-packages directory, loaded that directory with `site.addsitedir`, imported pyserial + pywin32 service modules, and verified package versions `3.5` and `312`.
 
-Acceptance:
+Field result:
 
 ```text
+Downloading locked Python package pyserial...
+Python package pyserial download: verified size + SHA256
+Downloading locked Python package pywin32...
+Python package pywin32 download: verified size + SHA256
+Installing only verified locked wheel files...
+Successfully installed pyserial-3.5 pywin32-312
 LOCKED_PYTHON_PACKAGES_INSTALLED
 LOCKED_PYTHON_IMPORTS_OK
 LOCKED_PYTHON_INSTALL_TEST_OK
 ```
 
-Only after this passes will production `ensure-runtime.ps1` be switched from version-only PyPI resolution to this verified locked-wheel path.
+The real Vector runtime was not modified by this validation.
+
+Two subsequent PowerShell `CommandNotFoundException` messages were unrelated to the test: the wheel filenames were entered manually as shell commands. `.whl` files are Python package archives, not executable PowerShell commands.
+
+Result: **D8D.3A.2 LOCKED PYTHON INSTALLATION PATH VALIDATED IN FIELD.**
+
+Next production step: switch `ensure-runtime.ps1` from version-only PyPI resolution to the verified locked-wheel path while preserving the D7 pywin32 service-host staging, safety gate and rollback behavior.
