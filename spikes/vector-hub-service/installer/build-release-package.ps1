@@ -7,6 +7,7 @@ $ProgressPreference = "SilentlyContinue"
 
 $InstallerRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ReleasePath = Join-Path $InstallerRoot "release.json"
+$SourceLockPath = Join-Path $InstallerRoot "source-lock.json"
 
 if (-not (Test-Path $ReleasePath -PathType Leaf)) {
     throw "release.json was not found: $ReleasePath"
@@ -38,14 +39,36 @@ function Write-Utf8NoBom([string]$Path,[string]$Text) {
     [System.IO.File]::WriteAllText($Path,$Text,$utf8)
 }
 
-$gitRoot = Find-GitRoot $InstallerRoot
-$sourceCommit = "unknown"
-if ($gitRoot) {
+$sourceCommit = $null
+$sourceResolution = $null
+if (Test-Path $SourceLockPath -PathType Leaf) {
     try {
-        $sourceCommit = (& git -C $gitRoot rev-parse HEAD 2>$null | Select-Object -First 1).Trim()
-        if (-not $sourceCommit) { $sourceCommit = "unknown" }
+        $sourceLock = Get-Content -LiteralPath $SourceLockPath -Raw | ConvertFrom-Json
+        $candidate = [string]$sourceLock.source_commit
+        if ($candidate -match '^[0-9a-fA-F]{40}$') {
+            $sourceCommit = $candidate.ToLowerInvariant()
+            $sourceResolution = "source-lock"
+        }
     }
-    catch { $sourceCommit = "unknown" }
+    catch {}
+}
+
+if (-not $sourceCommit) {
+    $gitRoot = Find-GitRoot $InstallerRoot
+    if ($gitRoot) {
+        try {
+            $candidate = (& git -C $gitRoot rev-parse HEAD 2>$null | Select-Object -First 1).Trim()
+            if ($candidate -match '^[0-9a-fA-F]{40}$') {
+                $sourceCommit = $candidate.ToLowerInvariant()
+                $sourceResolution = "git-head"
+            }
+        }
+        catch {}
+    }
+}
+
+if (-not $sourceCommit) {
+    throw "Cannot determine immutable source commit. Refresh this installer with bootstrap-vector.ps1 or build from a Git checkout before creating a release package."
 }
 
 $tempRoot = Join-Path $env:TEMP ("GADX-Vector-package-" + [Guid]::NewGuid().ToString("N"))
@@ -57,6 +80,7 @@ Write-Host ""
 Write-Host "GADX Vector - D8D release package builder" -ForegroundColor Cyan
 Write-Host "Release      : $version / $([string]$release.channel) / $([string]$release.phase)"
 Write-Host "Source commit: $sourceCommit"
+Write-Host "Resolution   : $sourceResolution"
 Write-Host "Output       : $zipPath"
 Write-Host ""
 
@@ -74,6 +98,16 @@ try {
         $path = Join-Path $stageRoot $relative
         if (Test-Path $path) { Remove-Item -LiteralPath $path -Recurse -Force }
     }
+
+    $stageLock = [ordered]@{
+        format = 1
+        repository = [string]$release.repository
+        requested_ref = "release-package"
+        source_commit = $sourceCommit
+        resolution = "immutable-package-lock"
+        resolved_utc = [DateTime]::UtcNow.ToString('o')
+    }
+    Write-Utf8NoBom (Join-Path $stageRoot "source-lock.json") ($stageLock | ConvertTo-Json -Depth 4)
 
     $manifestPath = Join-Path $stageRoot "package-manifest.json"
     if (Test-Path $manifestPath) { Remove-Item -LiteralPath $manifestPath -Force }
@@ -108,6 +142,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\verify-package.ps1
 Expected result:
 PACKAGE_VERIFY_OK
 
+Immutable source
+----------------
+This package is pinned to the exact Git commit below. bootstrap-vector.ps1 will use source-lock.json from the package and download that exact commit instead of following the moving main branch.
+
 Release metadata
 ----------------
 Product : $([string]$release.product)
@@ -140,6 +178,7 @@ Source  : $sourceCommit
         repository = [string]$release.repository
         repository_path = [string]$release.path
         source_commit = $sourceCommit
+        source_resolution = $sourceResolution
         files = $files
     }
     Write-Utf8NoBom $manifestPath ($manifest | ConvertTo-Json -Depth 8)
@@ -161,6 +200,7 @@ Source  : $sourceCommit
     Write-Host "ZIP           : $zipPath"
     Write-Host "ZIP SHA256    : $zipHash"
     Write-Host "SHA256 file   : $shaPath"
+    Write-Host "Pinned commit : $sourceCommit"
 }
 finally {
     if (Test-Path $tempRoot) {
