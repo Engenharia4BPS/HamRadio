@@ -26,98 +26,93 @@ PACKAGE_VERIFY_OK
 
 Result: **D8D.1 VALIDATED IN FIELD.**
 
-### Finding
-
-The first field build reported:
-
-```text
-Source commit: unknown
-```
-
-This is expected when the package is built from `C:\Ham\GADX-Vector\installer`, because that installed tree is not a Git working copy. D8D.2 therefore adds an explicit immutable source lock rather than relying on `.git` metadata.
-
 ---
 
 ## D8D.2 - Immutable source pinning
 
-Status: **PACKAGE BUILD + VERIFY VALIDATED; PACKAGED BOOTSTRAP TEST PENDING**
+Status: **VALIDATED IN FIELD**
 Release: `0.8.0-dev.5 / development / D8D`
 Date: 2026-09-06
 
-Design:
-
-1. `bootstrap-vector.ps1` resolves a moving ref such as `main` to one exact 40-character Git commit before download.
-2. The bootstrap downloads the archive by commit SHA, not by moving branch name.
-3. The installed installer receives `source-lock.json` containing the resolved commit.
-4. `build-release-package.ps1` requires an immutable source commit from `source-lock.json` or a real Git checkout.
-5. The distribution package receives its own `source-lock.json` with `resolution = immutable-package-lock`.
-6. When the packaged bootstrap is executed, it reads the package lock and downloads that exact commit without resolving `main` again.
-
-### Field evidence
-
-The local bootstrap resolved `main` to:
+Field commit lock:
 
 ```text
 34deed4b4ec64285eb24598568bb4162014e8e51
 ```
 
-Observed bootstrap output:
+The local bootstrap resolved `main` once and then downloaded by exact SHA:
 
 ```text
 Source       : Engenharia4BPS/HamRadio @ 34deed4b4ec64285eb24598568bb4162014e8e51
 Resolution   : resolved-ref
-Release      : 0.8.0-dev.5 / development / D8D
 Pinned commit: 34deed4b4ec64285eb24598568bb4162014e8e51
 ```
 
-The installed source lock contained the same commit:
-
-```text
-repository    = Engenharia4BPS/HamRadio
-requested_ref = main
-source_commit = 34deed4b4ec64285eb24598568bb4162014e8e51
-resolution    = resolved-ref
-```
-
-The release builder then reported:
-
-```text
-Source commit: 34deed4b4ec64285eb24598568bb4162014e8e51
-Resolution   : source-lock
-Pinned commit: 34deed4b4ec64285eb24598568bb4162014e8e51
-```
-
-Generated package:
+The release builder used the same source lock and generated:
 
 ```text
 C:\Ham\GADX-Vector\dist\GADX-Vector-0.8.0-dev.5.zip
 SHA256: 941ba4f38dabc25826afff4ce9c3278e8aee27b017f87c449ddeb7ad0066d5fa
 ```
 
-After extraction, `verify-package.ps1` checked 27 manifest-tracked files and returned:
+`verify-package.ps1` checked 27 manifest-tracked files and returned:
 
 ```text
 PACKAGE_VERIFY_OK
 ```
 
-The stale `%TEMP%\gadx-vector-bootstrap.ps1` was also replaced with the current pinned bootstrap to prevent accidentally returning to the pre-D8D moving-main behavior during field development.
-
-### Remaining acceptance test
-
-Run `bootstrap-vector.ps1` from the extracted `0.8.0-dev.5` package and confirm that it reports:
+The decisive packaged-bootstrap test was then run from the extracted ZIP. It reported:
 
 ```text
 Source       : Engenharia4BPS/HamRadio @ 34deed4b4ec64285eb24598568bb4162014e8e51
 Resolution   : package-lock
+Release      : 0.8.0-dev.5 / development / D8D
+Pinned commit: 34deed4b4ec64285eb24598568bb4162014e8e51
 ```
 
-The same SHA must continue to appear in:
+The installed machine remained healthy:
 
 ```text
-source-lock.json
-package-manifest.json -> source_commit
-PACKAGE-README.txt -> Source
-bootstrap console output
+Detected     : CURRENT
+Mode         : NONE
+Payload drift: NO
 ```
 
-If that test passes, D8D.2 immutable source pinning is fully field-validated.
+Result: **D8D.2 IMMUTABLE SOURCE PINNING VALIDATED IN FIELD.**
+
+---
+
+## D8D.3 - Reproducible dependency lock
+
+Status: **D8D.3A IN FIELD VALIDATION**
+Release: `0.8.0-dev.6 / development / D8D.3`
+
+D8D.3A introduces `dependency-lock.json` and `verify-dependency-lock.ps1`.
+
+The initial lock pins these downloadable artifacts by version, size and SHA256:
+
+```text
+Python 3.10.11 x64
+pyserial 3.5 wheel
+pywin32 312 cp310 win_amd64 wheel
+```
+
+The validator has two modes:
+
+```text
+structure-only
+online hash verification
+```
+
+Online validation downloads into a temporary directory only, compares exact size + SHA256, then deletes the temporary files. It does not touch the Vector runtime, service, COM configuration or radio.
+
+com0com remains explicitly marked as not-yet-pinned in D8D.3A. Its redistribution/source/hash policy will be handled separately in D8D.3B instead of silently treating the currently installed copy as reproducible.
+
+Acceptance for D8D.3A:
+
+```text
+DEPENDENCY_LOCK_STRUCTURE_OK
+DEPENDENCY_LOCK_ONLINE_OK
+```
+
+Only after that field test will `ensure-runtime.ps1` be changed to consume the lock for actual runtime installation/repair.
