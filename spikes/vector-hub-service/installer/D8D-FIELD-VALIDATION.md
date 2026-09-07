@@ -80,6 +80,24 @@ Payload drift: NO
 
 Result: **D8D.2 IMMUTABLE SOURCE PINNING VALIDATED IN FIELD.**
 
+### Development refresh policy
+
+Field development immediately exposed an important consequence of immutable package-lock behavior: after testing an extracted pinned package, the installed bootstrap correctly continued to follow that package lock and therefore did not automatically see newer commits on `main`.
+
+This is correct for a distributed release, but development needs an explicit escape hatch. `bootstrap-vector.ps1` now accepts:
+
+```powershell
+-RefreshSource
+```
+
+Default behavior remains immutable: when a local source lock exists, the bootstrap uses `package-lock`. Only an explicit `-RefreshSource` bypasses the local lock once, resolves the configured default ref (`main`) to a new exact SHA, downloads by that SHA, and writes a new source lock with:
+
+```text
+Resolution: resolved-ref-refresh
+```
+
+This preserves release immutability while providing a deliberate development/update path.
+
 ---
 
 ## D8D.3 - Reproducible dependency lock
