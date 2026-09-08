@@ -138,7 +138,7 @@ function Get-Com0comInstaller([switch]$Download) {
     Write-Host "Downloading locked com0com $Com0comVersion distribution..."
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -UseBasicParsing -Uri ([string]$Com0comArtifact.url) -OutFile $DownloadedCom0comInstaller
+        Invoke-WebRequest -UseBasicParsing -UserAgent "curl" -Uri ([string]$Com0comArtifact.url) -OutFile $DownloadedCom0comInstaller
     }
     catch {
         if (Test-Path $DownloadedCom0comInstaller) { Remove-Item -LiteralPath $DownloadedCom0comInstaller -Force -ErrorAction SilentlyContinue }
