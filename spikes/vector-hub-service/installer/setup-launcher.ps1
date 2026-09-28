@@ -332,6 +332,10 @@ $previewButton.Add_Click({
         $applyButton.Enabled = $canApply
         if ($script:previewPassed) {
             $statusBar.Text = $(if ($canApply) { "Preview passed. Review the plan before Apply." } else { "Preview passed. No Apply is required." })
+        } elseif ($result.ExitCode -eq 4) {
+            $statusBar.Text = "Preview blocked: create/apply the missing virtual COM pairs in Port Manager."
+        } elseif ($result.ExitCode -eq 5) {
+            $statusBar.Text = "Preview blocked: reboot Windows so the virtual COM ports can enumerate."
         } else {
             $statusBar.Text = "Preview failed. Apply remains disabled."
         }
