@@ -166,6 +166,18 @@ function Get-VirtualComPreflight {
     $setupc = Find-Com0comSetup
     $snapshot = if ($setupc) { Get-Com0comSnapshot $setupc } else { "" }
 
+    $driverCode52 = @()
+    try {
+        $driverCode52 = @(
+            Get-CimInstance Win32_PnPEntity -ErrorAction Stop |
+            Where-Object {
+                $_.PNPDeviceID -like 'ROOT\COM0COM*' -and
+                [int]$_.ConfigManagerErrorCode -eq 52
+            }
+        )
+    }
+    catch {}
+
     $missingPairs = @()
     foreach ($port in $configured) {
         if ($snapshot -notmatch ('(?i)\b' + [regex]::Escape($port) + '\b')) {
@@ -195,6 +207,7 @@ function Get-VirtualComPreflight {
         MissingPairs = @($missingPairs)
         NotEnumerated = @($notEnumerated)
         RebootMarker = (Test-Path $RebootMarker -PathType Leaf)
+        DriverCode52 = @($driverCode52)
     }
 }
 
@@ -312,6 +325,13 @@ if (-not $Apply) {
             exit 4
         }
 
+        if ($virtualPreflight.DriverCode52.Count -gt 0) {
+            Write-Host "  BLOCKED - com0com driver is present but Windows rejected its kernel signature (Code 52)." -ForegroundColor Red
+            Write-Host "  The locked 2017 com0com package is not usable with the current Windows driver-signing policy on this machine." -ForegroundColor Yellow
+            Write-Host "  For this disposable VM test, Secure Boot can be disabled in the VM firmware; production requires a modern properly signed virtual-COM driver." -ForegroundColor Yellow
+            exit 6
+        }
+
         if ($virtualPreflight.NotEnumerated.Count -gt 0) {
             Write-Host "  BLOCKED - configured ports are not yet enumerated by Windows: $($virtualPreflight.NotEnumerated -join ', ')" -ForegroundColor Red
             Write-Host "  Reboot Windows after com0com changes, then run Preview again." -ForegroundColor Yellow
@@ -330,6 +350,10 @@ if (-not $configReady) { throw "Current vector.ini is missing: $Config" }
 if ($virtualPreflight) {
     if ($virtualPreflight.MissingPairs.Count -gt 0) {
         throw "Required Vector COM pairs are missing from com0com: $($virtualPreflight.MissingPairs -join ', '). Open Port Manager and apply the required pairs before D7."
+    }
+
+    if ($virtualPreflight.DriverCode52.Count -gt 0) {
+        throw "com0com kernel driver was rejected by Windows with Code 52 (CM_PROB_UNSIGNED_DRIVER). The current locked 2017 com0com baseline is not compatible with this machine's driver-signing policy."
     }
 
     if ($virtualPreflight.NotEnumerated.Count -gt 0) {
