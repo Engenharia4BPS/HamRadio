@@ -237,6 +237,13 @@ if (-not $Apply) {
             exit 5
         }
 
+        if ($repairPreviewExit -eq 6) {
+            Write-Host ""
+            Write-Host "PREVIEW BLOCKED: Windows rejected the com0com kernel driver signature (Code 52)." -ForegroundColor Yellow
+            Write-Host "The current com0com dependency cannot be used under this machine's active driver-signing policy."
+            exit 6
+        }
+
         if ($repairPreviewExit -ne 0) {
             throw "repair-current.ps1 preview failed with exit code $repairPreviewExit"
         }
