@@ -106,6 +106,28 @@ if ($payloadDrift -and $state.recommended_mode -eq "NONE") {
 }
 $currentRepair = ($state.classification -eq "CURRENT" -and $state.recommended_mode -eq "REPAIR")
 
+# A failed clean install can leave only the private runtime/com0com behind.
+# That state is intentionally classified as BROKEN by the generic detector,
+# but it is not a migrated/current installation and must resume the clean
+# preparation path rather than attempting a service transaction without
+# vector.ini.
+$currentKnownCount = @(
+    $state.current_files.PSObject.Properties |
+    Where-Object { [bool]$_.Value }
+).Count
+$legacyKnownCount = @(
+    $state.legacy_files.PSObject.Properties |
+    Where-Object { [bool]$_.Value }
+).Count
+$interruptedClean = (
+    $state.classification -eq "BROKEN" -and
+    -not $state.migration_required -and
+    $currentKnownCount -eq 0 -and
+    $legacyKnownCount -eq 0 -and
+    -not [bool]$state.services.current.exists -and
+    -not [bool]$state.services.legacy.exists
+)
+
 if ($AsJson) {
     $releaseLabel = Get-ReleaseLabel
     [ordered]@{
@@ -185,6 +207,15 @@ if (-not $Apply) {
     Write-Host "Step 1 - runtime/com0com:"
     Invoke-Step $runtime @('-InstallRoot',$InstallRoot)
 
+    if ($interruptedClean) {
+        Write-Host ""
+        Write-Host "Step 2 - resume interrupted clean-install preparation:"
+        Invoke-Step $prepareClean @('-InstallRoot',$InstallRoot)
+        Write-Host ""
+        Write-Host "PREVIEW complete. This BROKEN state is a resumable clean install; no service transaction will run until vector.ini and COM pairs exist." -ForegroundColor Yellow
+        exit 0
+    }
+
     if ($currentRepair) {
         Write-Host ""
         Write-Host "Step 2 - D7 current installation repair/update:"
@@ -210,6 +241,20 @@ if (-not $Apply) {
 
     Write-Host ""
     Write-Host "PREVIEW complete. Re-run with -Apply to execute the detected plan." -ForegroundColor Yellow
+    exit 0
+}
+
+if ($interruptedClean) {
+    Write-Host "Resuming interrupted clean-install preparation..."
+    Write-Host ""
+    Write-Host "[1/2] Ensuring runtime and com0com..."
+    Invoke-Step $runtime @('-InstallRoot',$InstallRoot,'-Apply')
+    Write-Host ""
+    Write-Host "[2/2] Deploying current generation, creating vector.ini and opening Port Manager..."
+    Invoke-Step $prepareClean @('-InstallRoot',$InstallRoot,'-Apply')
+    Write-Host ""
+    Write-Host "Interrupted clean install resumed successfully." -ForegroundColor Green
+    Write-Host "Next: review station-specific [radio_keying] and [rig], then continue commissioning."
     exit 0
 }
 
