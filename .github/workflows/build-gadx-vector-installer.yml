@@ -73,8 +73,13 @@ jobs:
           $sha = "$exe.sha256"
           $title = "GADX Vector $version"
 
+          $savedErrorAction = $ErrorActionPreference
+          $ErrorActionPreference = 'SilentlyContinue'
           gh release view $tag --repo "${{ github.repository }}" *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $releaseExists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = $savedErrorAction
+
+          if ($releaseExists) {
             gh release upload $tag $exe $sha --clobber --repo "${{ github.repository }}"
             if ($LASTEXITCODE -ne 0) { throw "gh release upload failed." }
           }
