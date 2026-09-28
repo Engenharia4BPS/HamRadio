@@ -100,8 +100,12 @@ function Find-Com0comSetup {
 function Invoke-Com0com([string]$SetupExe,[string[]]$Arguments) {
     $cwd = Split-Path -Parent $SetupExe
     Push-Location $cwd
-    try { return @(& $SetupExe @Arguments 2>&1) }
-    finally { Pop-Location }
+    try {
+        return @(& $SetupExe @Arguments 2>&1)
+    }
+    finally {
+        Pop-Location
+    }
 }
 
 function Get-Com0comSnapshot([string]$SetupExe) {
@@ -115,71 +119,11 @@ function Get-ConfiguredVectorPorts {
 
     $section = ""
     $ports = @()
+
     foreach ($line in Get-Content -LiteralPath $Config) {
         $trim = ([string]$line).Trim()
-        if ($trim -match '^\[([^\]]+)\]$') {
-            $section = $Matches[1].ToLowerInvariant()
-            continue
-        }
-        if (-not $trim -or $trim.StartsWith(';') -or $trim.StartsWith('#')) { continue }
 
-        if ($section -eq 'cat' -and $trim -match '^ports\s*=\s*(.+)$') {
-            foreach ($item in $Matches[1].Split(',')) {
-                $port = $item.Trim().ToUpperInvariant()
-                if ($port -match '^COM\d+$') { $ports += $port }
-            }
-        }
-        elseif ($section -eq 'keying' -and $trim -match '^client\d+\s*=\s*(.+)$') {
-            $parts = @($Matches[1].Split(',') | ForEach-Object { $_.Trim() })
-            if ($parts.Count -ge 4) { $port = $parts[1].ToUpperInvariant() }
-            elseif ($parts.Count -ge 3) { $port = $parts[0].ToUpperInvariant() }
-            else { $port = "" }
-            if ($port -match '^COM\d+$') { $ports += $port }
-        }
-    }
-
-    return @($ports | Select-Object -Unique)
-}
-
-function Get-VirtualComPreflight {
-    $configured = @(Get-ConfiguredVectorPorts)
-    $setupc = Find-Com0comSetup
-    $snapshot = if ($setupc) { Get-Com0comSnapshot $setupc } else { "" }
-
-    $missingPairs = @()
-    foreach ($port in $configured) {
-        if ($snapshot -notmatch ('(?i)\b' + [regex]::Escape($port) + '\b')) {
-            $missingPairs += $port
-        }
-    }
-
-    $windowsPorts = @()
-    try {
-        $windowsPorts = @(
-            [System.IO.Ports.SerialPort]::GetPortNames() |
-            ForEach-Object { $_.ToUpperInvariant() }
-        )
-    }
-    catch {}
-
-    $notEnumerated = @()
-    foreach ($port in $configured) {
-        if ($windowsPorts -notcontains $port) {
-            $notEnumerated += $port
-        }
-    }
-
-    return [pscustomobject]@{
-        Setupc = $setupc
-        Configured = $configured
-        MissingPairs = @($missingPairs)
-        NotEnumerated = @($notEnumerated)
-        RebootMarker = (Test-Path $RebootMarker -PathType Leaf)
-    }
-}
-
-function Test-Rigctld([string]$HostName,[int]$PortNumber,[string]$Command) {
-    $client = New-Object System.Net.Sockets.TcpClient
+        if ($trim -match '^\[([^\]]+)\]    $client = New-Object System.Net.Sockets.TcpClient
     try {
         $iar = $client.BeginConnect($HostName,$PortNumber,$null,$null)
         if (-not $iar.AsyncWaitHandle.WaitOne(2000,$false)) { throw "connection timeout" }
@@ -196,9 +140,7 @@ function Test-Rigctld([string]$HostName,[int]$PortNumber,[string]$Command) {
         if ($null -eq $line) { throw "rigctld closed connection" }
         return $line.Trim()
     }
-    finally {
-        $client.Close()
-    }
+    finally { $client.Close() }
 }
 
 function Get-IniValue([string]$Path,[string]$Section,[string]$Key) {
@@ -287,18 +229,22 @@ if (-not $Apply) {
         Write-Host ""
         Write-Host "Virtual COM preflight:"
         Write-Host "  Configured Vector ports: $($virtualPreflight.Configured -join ', ')"
+
         if ($virtualPreflight.MissingPairs.Count -gt 0) {
             Write-Host "  BLOCKED - missing from com0com: $($virtualPreflight.MissingPairs -join ', ')" -ForegroundColor Red
             Write-Host "  Open Port Manager, create/apply the required pairs, then run Preview again." -ForegroundColor Yellow
             exit 4
         }
+
         if ($virtualPreflight.NotEnumerated.Count -gt 0) {
             Write-Host "  BLOCKED - configured ports are not yet enumerated by Windows: $($virtualPreflight.NotEnumerated -join ', ')" -ForegroundColor Red
             Write-Host "  Reboot Windows after com0com changes, then run Preview again." -ForegroundColor Yellow
             exit 5
         }
+
         Write-Host "  com0com pairs / Windows enumeration: OK" -ForegroundColor Green
     }
+
     exit 0
 }
 
@@ -309,9 +255,11 @@ if ($virtualPreflight) {
     if ($virtualPreflight.MissingPairs.Count -gt 0) {
         throw "Required Vector COM pairs are missing from com0com: $($virtualPreflight.MissingPairs -join ', '). Open Port Manager and apply the required pairs before D7."
     }
+
     if ($virtualPreflight.NotEnumerated.Count -gt 0) {
         throw "Required Vector COM ports are not enumerated by Windows: $($virtualPreflight.NotEnumerated -join ', '). Reboot Windows after com0com changes before D7."
     }
+
     if ($virtualPreflight.RebootMarker) {
         Remove-Item -LiteralPath $RebootMarker -Force -ErrorAction SilentlyContinue
         Write-Host "Virtual COM reboot marker cleared: all configured Vector ports are enumerated." -ForegroundColor Green
@@ -460,7 +408,10 @@ catch {
             $section = $Matches[1].ToLowerInvariant()
             continue
         }
-        if (-not $trim -or $trim.StartsWith(';') -or $trim.StartsWith('#')) { continue }
+
+        if (-not $trim -or $trim.StartsWith(';') -or $trim.StartsWith('#')) {
+            continue
+        }
 
         if ($section -eq 'cat' -and $trim -match '^ports\s*=\s*(.+)    $client = New-Object System.Net.Sockets.TcpClient
     try {
@@ -951,7 +902,9 @@ catch {
 
     throw "D7 repair aborted safely. Backup: $BackupRoot. GADXVectorHub was left stopped/disabled whenever possible. Original error: $failure"
 }
-) { $ports += $port }
+) {
+                    $ports += $port
+                }
             }
         }
         elseif ($section -eq 'keying' -and $trim -match '^client\d+\s*=\s*(.+)    $client = New-Object System.Net.Sockets.TcpClient
@@ -1199,9 +1152,16 @@ catch {
 }
 ) {
             $parts = @($Matches[1].Split(',') | ForEach-Object { $_.Trim() })
-            if ($parts.Count -ge 4) { $port = $parts[1].ToUpperInvariant() }
-            elseif ($parts.Count -ge 3) { $port = $parts[0].ToUpperInvariant() }
-            else { $port = "" }
+            if ($parts.Count -ge 4) {
+                $port = $parts[1].ToUpperInvariant()
+            }
+            elseif ($parts.Count -ge 3) {
+                $port = $parts[0].ToUpperInvariant()
+            }
+            else {
+                $port = ""
+            }
+
             if ($port -match '^COM\d+    $client = New-Object System.Net.Sockets.TcpClient
     try {
         $iar = $client.BeginConnect($HostName,$PortNumber,$null,$null)
@@ -1445,7 +1405,9 @@ catch {
 
     throw "D7 repair aborted safely. Backup: $BackupRoot. GADXVectorHub was left stopped/disabled whenever possible. Original error: $failure"
 }
-) { $ports += $port }
+) {
+                $ports += $port
+            }
         }
     }
 
@@ -1466,7 +1428,10 @@ function Get-VirtualComPreflight {
 
     $windowsPorts = @()
     try {
-        $windowsPorts = @([System.IO.Ports.SerialPort]::GetPortNames() | ForEach-Object { $_.ToUpperInvariant() })
+        $windowsPorts = @(
+            [System.IO.Ports.SerialPort]::GetPortNames() |
+            ForEach-Object { $_.ToUpperInvariant() }
+        )
     }
     catch {}
 
