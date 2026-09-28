@@ -51,6 +51,23 @@ jobs:
           Get-Item $exe,$sha | Format-Table FullName,Length
           Get-FileHash $exe -Algorithm SHA256
 
+      - name: Create ZIP download bundle
+        shell: powershell
+        run: |
+          $release = Get-Content 'spikes/vector-hub-service/installer/release.json' -Raw | ConvertFrom-Json
+          $version = [string]$release.version
+          $dir = 'spikes/vector-hub-service/dist/exe'
+          $exe = Join-Path $dir "GADX-Vector-Setup-$version.exe"
+          $sha = "$exe.sha256"
+          $zip = Join-Path $dir "GADX-Vector-Setup-$version.zip"
+
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -LiteralPath $exe,$sha -DestinationPath $zip -CompressionLevel Optimal -Force
+
+          if (-not (Test-Path $zip -PathType Leaf)) { throw "ZIP bundle not produced: $zip" }
+          Get-Item $zip | Format-Table FullName,Length
+          Get-FileHash $zip -Algorithm SHA256
+
       - name: Upload installer EXE
         uses: actions/upload-artifact@v4
         with:
@@ -58,6 +75,7 @@ jobs:
           path: |
             spikes/vector-hub-service/dist/exe/GADX-Vector-Setup-*.exe
             spikes/vector-hub-service/dist/exe/GADX-Vector-Setup-*.exe.sha256
+            spikes/vector-hub-service/dist/exe/GADX-Vector-Setup-*.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -71,6 +89,7 @@ jobs:
           $tag = "gadx-vector-v$version"
           $exe = "spikes/vector-hub-service/dist/exe/GADX-Vector-Setup-$version.exe"
           $sha = "$exe.sha256"
+          $zip = "spikes/vector-hub-service/dist/exe/GADX-Vector-Setup-$version.zip"
           $title = "GADX Vector $version"
 
           $savedErrorAction = $ErrorActionPreference
@@ -80,7 +99,7 @@ jobs:
           $ErrorActionPreference = $savedErrorAction
 
           if ($releaseExists) {
-            gh release upload $tag $exe $sha --clobber --repo "${{ github.repository }}"
+            gh release upload $tag $exe $sha $zip --clobber --repo "${{ github.repository }}"
             if ($LASTEXITCODE -ne 0) { throw "gh release upload failed." }
           }
           else {
@@ -91,6 +110,6 @@ jobs:
 
           This build is published as a prerelease because clean-VM validation was intentionally skipped.
           "@
-            gh release create $tag $exe $sha --prerelease --title $title --notes $notes --repo "${{ github.repository }}"
+            gh release create $tag $exe $sha $zip --prerelease --title $title --notes $notes --repo "${{ github.repository }}"
             if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
           }
