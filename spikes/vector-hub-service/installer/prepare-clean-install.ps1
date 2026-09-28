@@ -137,11 +137,12 @@ client1 = Log4OM,COM$key1,DTR,RTS
 client2 = N1MM,COM$key2,DTR,NONE
 
 [radio_keying]
-; Adjust these values for the physical radio/interface before starting GADXVectorHub.
-port = COM4
+; SAFE commissioning defaults: do not guess a physical serial port.
+; Configure these values for the station only after reviewing the actual radio/interface.
+port =
 baud = 19200
-ptt_line = RTS
-cw_line = DTR
+ptt_line = NONE
+cw_line = NONE
 
 [rig]
 host = 127.0.0.1
@@ -200,6 +201,7 @@ if (-not $Apply) {
     Write-Host "PREVIEW ONLY - no changes were made." -ForegroundColor Yellow
     Write-Host "  1. Deploy current app/service/tools payload."
     Write-Host "  2. Create initial vector.ini only if it does not exist, allocating free internal COMs from COM101 upward."
+    Write-Host "     Physical radio keying starts DISABLED (port blank, PTT=NONE, CW=NONE) until the operator configures the station."
     Write-Host "  3. Open Port Manager and wait for the operator to review/apply COM pairs."
     Write-Host "  4. Validate that every CAT/KEYING Vector COM in vector.ini exists in com0com."
     Write-Host "  5. Detect whether com0com pairs changed and mark reboot pending when needed."
@@ -258,4 +260,5 @@ Write-Host "Port Manager  : $PortManager"
 Write-Host "Reboot pending: $(Test-Path $RebootMarker -PathType Leaf)"
 Write-Host ""
 Write-Host "The GADXVectorHub service is intentionally NOT started by D5 clean preparation."
-Write-Host "Review [radio_keying] and [rig] for this station before the service transaction."
+Write-Host "Initial [radio_keying] is fail-safe: no physical COM is selected and PTT/CW outputs are disabled."
+Write-Host "Review [radio_keying] and [rig] for this station before enabling physical keying."
