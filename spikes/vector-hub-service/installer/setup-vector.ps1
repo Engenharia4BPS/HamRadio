@@ -219,7 +219,28 @@ if (-not $Apply) {
     if ($currentRepair) {
         Write-Host ""
         Write-Host "Step 2 - D7 current installation repair/update:"
-        Invoke-Step $repairCurrent @('-InstallRoot',$InstallRoot)
+
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $repairCurrent -InstallRoot $InstallRoot
+        $repairPreviewExit = $LASTEXITCODE
+
+        if ($repairPreviewExit -eq 4) {
+            Write-Host ""
+            Write-Host "PREVIEW BLOCKED: one or more Vector COM ports required by vector.ini do not exist in com0com." -ForegroundColor Yellow
+            Write-Host "Open Port Manager, create/apply the required pairs, then run Preview again."
+            exit 4
+        }
+
+        if ($repairPreviewExit -eq 5) {
+            Write-Host ""
+            Write-Host "PREVIEW BLOCKED: required Vector COM ports exist in com0com but are not yet enumerated by Windows." -ForegroundColor Yellow
+            Write-Host "Reboot Windows, then run Preview again."
+            exit 5
+        }
+
+        if ($repairPreviewExit -ne 0) {
+            throw "repair-current.ps1 preview failed with exit code $repairPreviewExit"
+        }
+
         Write-Host ""
         Write-Host "PREVIEW complete. Re-run with -Apply to execute the detected CURRENT/REPAIR plan." -ForegroundColor Yellow
         exit 0
