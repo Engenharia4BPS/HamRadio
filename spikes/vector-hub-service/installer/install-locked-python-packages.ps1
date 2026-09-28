@@ -100,7 +100,13 @@ if ($TargetDirectory) {
     New-Item -ItemType Directory -Force -Path $TargetDirectory | Out-Null
 }
 
-$args = @('-m','pip','install','--disable-pip-version-check','--no-index','--no-deps')
+$args = @(
+    '-m','pip','install',
+    '--disable-pip-version-check',
+    '--no-warn-script-location',
+    '--no-index',
+    '--no-deps'
+)
 if ($TargetDirectory) {
     $args += @('--target',$TargetDirectory)
 }
@@ -112,9 +118,30 @@ foreach ($wheel in $wheelPaths) { $args += $wheel }
 
 Write-Host ""
 Write-Host "Installing only verified locked wheel files..." -ForegroundColor Cyan
-& $PythonExe @args
-if ($LASTEXITCODE -ne 0) {
-    throw "pip failed while installing verified locked Python packages."
+
+# pip legitimately writes warnings to stderr (for example, Scripts not being on
+# PATH). Under Windows PowerShell 5.1 with ErrorActionPreference=Stop those
+# warnings can be promoted to terminating NativeCommandError records even when
+# pip exits successfully. Capture the native streams and judge success by the
+# process exit code instead.
+$previousErrorActionPreference = $ErrorActionPreference
+$pipOutput = @()
+$pipExitCode = -1
+try {
+    $ErrorActionPreference = "Continue"
+    $pipOutput = @(& $PythonExe @args 2>&1)
+    $pipExitCode = $LASTEXITCODE
+}
+finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
+
+foreach ($line in $pipOutput) {
+    Write-Host ([string]$line)
+}
+
+if ($pipExitCode -ne 0) {
+    throw "pip failed while installing verified locked Python packages (exit $pipExitCode)."
 }
 
 Write-Host "LOCKED_PYTHON_PACKAGES_INSTALLED" -ForegroundColor Green
