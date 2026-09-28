@@ -117,7 +117,69 @@ function Get-ConfiguredVectorPorts {
     $ports = @()
     foreach ($line in Get-Content -LiteralPath $Config) {
         $trim = ([string]$line).Trim()
-        if ($trim -match '^\[([^\]]+)\]    $client = New-Object System.Net.Sockets.TcpClient
+        if ($trim -match '^\[([^\]]+)\]$') {
+            $section = $Matches[1].ToLowerInvariant()
+            continue
+        }
+        if (-not $trim -or $trim.StartsWith(';') -or $trim.StartsWith('#')) { continue }
+
+        if ($section -eq 'cat' -and $trim -match '^ports\s*=\s*(.+)$') {
+            foreach ($item in $Matches[1].Split(',')) {
+                $port = $item.Trim().ToUpperInvariant()
+                if ($port -match '^COM\d+$') { $ports += $port }
+            }
+        }
+        elseif ($section -eq 'keying' -and $trim -match '^client\d+\s*=\s*(.+)$') {
+            $parts = @($Matches[1].Split(',') | ForEach-Object { $_.Trim() })
+            if ($parts.Count -ge 4) { $port = $parts[1].ToUpperInvariant() }
+            elseif ($parts.Count -ge 3) { $port = $parts[0].ToUpperInvariant() }
+            else { $port = "" }
+            if ($port -match '^COM\d+$') { $ports += $port }
+        }
+    }
+
+    return @($ports | Select-Object -Unique)
+}
+
+function Get-VirtualComPreflight {
+    $configured = @(Get-ConfiguredVectorPorts)
+    $setupc = Find-Com0comSetup
+    $snapshot = if ($setupc) { Get-Com0comSnapshot $setupc } else { "" }
+
+    $missingPairs = @()
+    foreach ($port in $configured) {
+        if ($snapshot -notmatch ('(?i)\b' + [regex]::Escape($port) + '\b')) {
+            $missingPairs += $port
+        }
+    }
+
+    $windowsPorts = @()
+    try {
+        $windowsPorts = @(
+            [System.IO.Ports.SerialPort]::GetPortNames() |
+            ForEach-Object { $_.ToUpperInvariant() }
+        )
+    }
+    catch {}
+
+    $notEnumerated = @()
+    foreach ($port in $configured) {
+        if ($windowsPorts -notcontains $port) {
+            $notEnumerated += $port
+        }
+    }
+
+    return [pscustomobject]@{
+        Setupc = $setupc
+        Configured = $configured
+        MissingPairs = @($missingPairs)
+        NotEnumerated = @($notEnumerated)
+        RebootMarker = (Test-Path $RebootMarker -PathType Leaf)
+    }
+}
+
+function Test-Rigctld([string]$HostName,[int]$PortNumber,[string]$Command) {
+    $client = New-Object System.Net.Sockets.TcpClient
     try {
         $iar = $client.BeginConnect($HostName,$PortNumber,$null,$null)
         if (-not $iar.AsyncWaitHandle.WaitOne(2000,$false)) { throw "connection timeout" }
@@ -134,7 +196,9 @@ function Get-ConfiguredVectorPorts {
         if ($null -eq $line) { throw "rigctld closed connection" }
         return $line.Trim()
     }
-    finally { $client.Close() }
+    finally {
+        $client.Close()
+    }
 }
 
 function Get-IniValue([string]$Path,[string]$Section,[string]$Key) {
