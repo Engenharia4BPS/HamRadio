@@ -336,6 +336,8 @@ $previewButton.Add_Click({
             $statusBar.Text = "Preview blocked: create/apply the missing virtual COM pairs in Port Manager."
         } elseif ($result.ExitCode -eq 5) {
             $statusBar.Text = "Preview blocked: reboot Windows so the virtual COM ports can enumerate."
+        } elseif ($result.ExitCode -eq 6) {
+            $statusBar.Text = "Preview blocked: Windows rejected the com0com driver signature (Code 52)."
         } else {
             $statusBar.Text = "Preview failed. Apply remains disabled."
         }
