@@ -1,9 +1,9 @@
 {
   "product": "GADX Vector",
-  "version": "0.8.0-dev.37",
+  "version": "0.8.0-dev.38",
   "phase": "D8G",
   "channel": "development",
-  "baseline": "D8G-fix-virtual-com-preflight-syntax-2026-09-28",
+  "baseline": "D8G-com0com-code52-detection-2026-09-28",
   "repository": "Engenharia4BPS/HamRadio",
   "path": "spikes/vector-hub-service",
   "supported_windows": [
