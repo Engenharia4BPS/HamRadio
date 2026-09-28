@@ -68,6 +68,6 @@
         "sha256": "06005aae7596e07d2dfb11d06705acad59f39979833ea27e920638916a513c81"
       }
     ],
-    "compatibility_note": "The selected 2017 signed package is the field-validated GADX Vector baseline. Windows 10/11 Secure Boot and modern kernel-driver signing compatibility must still be exercised in the D8G release-candidate matrix; do not infer Secure Boot compatibility from Authenticode file signatures alone."
+    "compatibility_note": "D8G clean-VM validation on Windows 11 with Secure Boot enabled reproduced Code 52 (CM_PROB_UNSIGNED_DRIVER) with the pinned 2017 com0com package. This dependency is acceptable only for controlled testing where Windows permits the driver to load; it is not a production-ready Windows 10/11 Secure Boot baseline. Replace it with a modern Microsoft-compliant signed virtual-COM driver before 1.0."
   }
 }
