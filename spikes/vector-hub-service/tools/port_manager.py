@@ -1,5 +1,5 @@
 from __future__ import annotations
-import configparser,ctypes,queue,re,subprocess,sys,threading,tkinter as tk
+import configparser,ctypes,queue,re,subprocess,sys,threading,time,tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox,ttk
@@ -13,7 +13,7 @@ class ComPair:index:int;app_port:str;vector_port:str
 @dataclass
 class DesiredPair:name:str;kind:str;app_port:str;vector_port:str
 @dataclass
-class DesiredClient:name:str;cat_type:str;cat_app:str;cat_vector:str;key_type:str;key_app:str;key_vector:str
+class DesiredClient:name:str;cat_type:str;cat_app:str;cat_vector:str;key_type:str;key_app:str;key_vector:str;ptt_input:str="DTR";cw_input:str="RTS";role:str="GENERIC"
 class Com0Com:
  def __init__(self,e):self.exe=e
  @classmethod
@@ -39,7 +39,7 @@ class Com0Com:
    if m:s,i,p=m.groups();g.setdefault(int(i),{})[s.upper()]=p.upper()
   return [ComPair(i,x["A"],x["B"]) for i,x in sorted(g.items()) if "A" in x and "B" in x]
  def busy_names(self):return {x.strip().upper() for x in self.query(["busynames","*"],"busynames *").splitlines() if COM_RE.match(x.strip().upper())}
- def create_pair(self,a,v):return self.run(["install",f"PortName={a}",f"PortName={v}"],20)
+ def create_pair(self,a,v):return self.run(["install",f"PortName={a}",f"PortName={v}"],60)
  def remove_pair(self,i):return self.run(["remove",str(i)],20)
 def active_ports():return {(x.device or "").upper():(x.description or x.hwid or "Porta serial") for x in list_ports.comports() if x.device}
 def admin():
@@ -71,7 +71,7 @@ class Help(tk.Toplevel):
   super().__init__(p);self.title("Ajuda - GADX Vector Port Manager");self.geometry("760x650");o=ttk.Frame(self,padding=12);o.pack(fill="both",expand=True);ttk.Label(o,text="GADX Vector Port Manager - Ajuda",font=("Segoe UI",14,"bold")).pack(anchor="w",pady=(0,10));f=ttk.Frame(o);f.pack(fill="both",expand=True);s=ttk.Scrollbar(f);s.pack(side="right",fill="y");t=tk.Text(f,wrap="word",yscrollcommand=s.set,padx=10,pady=10);t.pack(fill="both",expand=True);s.config(command=t.yview);t.insert("1.0",self.TEXT);t.config(state="disabled");ttk.Button(o,text="Fechar",command=self.destroy).pack(side="right",pady=(10,0))
 class Row:
  def __init__(self,m,d):
-  self.m=m;t=m.table;self.name=tk.StringVar(value=d.name);self.ct=tk.StringVar(value=d.cat_type);self.ca=tk.StringVar(value=d.cat_app);self.cv=tk.StringVar(value=d.cat_vector);self.kt=tk.StringVar(value=d.key_type);self.ka=tk.StringVar(value=d.key_app);self.kv=tk.StringVar(value=d.key_vector);self.w=[ttk.Entry(t,textvariable=self.name,width=14),ttk.Combobox(t,textvariable=self.ct,values=("CAT","NONE"),width=8,state="readonly"),ttk.Combobox(t,textvariable=self.ca,width=9,state="readonly"),ttk.Label(t,text="↔"),ttk.Combobox(t,textvariable=self.cv,width=9,state="readonly"),ttk.Combobox(t,textvariable=self.kt,values=("KEYING","NONE"),width=9,state="readonly"),ttk.Combobox(t,textvariable=self.ka,width=9,state="readonly"),ttk.Label(t,text="↔"),ttk.Combobox(t,textvariable=self.kv,width=9,state="readonly"),ttk.Button(t,text="Remover",command=lambda:m.remove(self))];tips=["Nome amigavel: Log4OM, N1MM, OmniRig...","Habilita CAT","COM configurada no aplicativo","","COM interna do Vector","Habilita PTT/CW","COM de KEYING no aplicativo","","COM interna de KEYING","Remove do plano"]
+  self.m=m;t=m.table;self.name=tk.StringVar(value=d.name);self.ct=tk.StringVar(value=d.cat_type);self.ca=tk.StringVar(value=d.cat_app);self.cv=tk.StringVar(value=d.cat_vector);self.kt=tk.StringVar(value=d.key_type);self.ka=tk.StringVar(value=d.key_app);self.kv=tk.StringVar(value=d.key_vector);self.ptt_input=d.ptt_input.upper();self.cw_input=d.cw_input.upper();self.role=d.role.upper();self.w=[ttk.Entry(t,textvariable=self.name,width=14),ttk.Combobox(t,textvariable=self.ct,values=("CAT","NONE"),width=8,state="readonly"),ttk.Combobox(t,textvariable=self.ca,width=9,state="readonly"),ttk.Label(t,text="↔"),ttk.Combobox(t,textvariable=self.cv,width=9,state="readonly"),ttk.Combobox(t,textvariable=self.kt,values=("KEYING","NONE"),width=9,state="readonly"),ttk.Combobox(t,textvariable=self.ka,width=9,state="readonly"),ttk.Label(t,text="↔"),ttk.Combobox(t,textvariable=self.kv,width=9,state="readonly"),ttk.Button(t,text="Remover",command=lambda:m.remove(self))];tips=["Nome amigavel: Log4OM, N1MM, OmniRig...","Habilita CAT","COM configurada no aplicativo","","COM interna do Vector","Habilita PTT/CW","COM de KEYING no aplicativo","","COM interna de KEYING","Remove do plano"]
   for w,x in zip(self.w,tips):
    if x:m.tip(w,x)
   self.w[2].config(postcommand=lambda:self.choice(self.w[2],"app",self.ca.get()));self.w[4].config(postcommand=lambda:self.choice(self.w[4],"vec",self.cv.get()));self.w[6].config(postcommand=lambda:self.choice(self.w[6],"app",self.ka.get()));self.w[8].config(postcommand=lambda:self.choice(self.w[8],"vec",self.kv.get()));self.refresh()
@@ -87,6 +87,9 @@ class Row:
   if self.ct.get()!="NONE":r.append(DesiredPair(n,"CAT",self.ca.get().upper(),self.cv.get().upper()))
   if self.kt.get()!="NONE":r.append(DesiredPair(n,"KEYING",self.ka.get().upper(),self.kv.get().upper()))
   return r
+ def keying_tuple(self,index):
+  if self.kt.get()=="NONE":return None
+  return (index,self.name.get().strip() or f"Cliente {index}",self.kv.get().upper(),self.ptt_input.upper(),self.cw_input.upper())
 class App(tk.Tk):
  def __init__(self):super().__init__();self.title("GADX Vector Port Manager");self.geometry("1120x700");self.rows=[];self.c=None;self.ep=[];self.active={};self.busy=set();self.q=queue.Queue();self.progress=None;self.tips=[];self.build();self.after(150,lambda:self.refresh(True,True))
  def tip(self,w,t):self.tips.append(Tip(w,t))
@@ -95,8 +98,8 @@ class App(tk.Tk):
   f=ttk.LabelFrame(self,text="Inventario da maquina",padding=8);f.pack(fill="x",padx=10);self.st=tk.StringVar();ttk.Label(f,textvariable=self.st).pack(anchor="w");self.inv=tk.Text(f,height=7);self.inv.pack(fill="x")
   p=ttk.LabelFrame(self,text="Clientes e pares virtuais desejados",padding=8);p.pack(fill="both",expand=True,padx=10,pady=8);self.table=ttk.Frame(p);self.table.pack(fill="x");ttk.Label(self.table,text="Cliente",font=("Segoe UI",9,"bold")).grid(row=0,column=0,rowspan=2);ttk.Label(self.table,text="CAT",font=("Segoe UI",9,"bold")).grid(row=0,column=1,columnspan=4);ttk.Label(self.table,text="KEYING",font=("Segoe UI",9,"bold")).grid(row=0,column=6,columnspan=4)
   for c,x in {1:"Tipo",2:"Aplicativo",4:"Vector",6:"Tipo",7:"Aplicativo",9:"Vector"}.items():ttk.Label(self.table,text=x).grid(row=1,column=c)
-  b=ttk.Frame(p);b.pack(fill="x",pady=10);ttk.Button(b,text="+ Adicionar cliente",command=self.add).pack(side="left");ttk.Button(b,text="Sugestao 2 clientes",command=self.suggest).pack(side="left",padx=6)
-  self.msg=tk.StringVar(value="v0.13: inventario com0com robusto para instalacao limpa.");ttk.Label(self,textvariable=self.msg,padding=10).pack(side="bottom",fill="x");a=ttk.Frame(self,padding=10);a.pack(side="bottom",fill="x");ttk.Button(a,text="Carregar configuracao atual",command=self.load).pack(side="left");ttk.Button(a,text="Recarregar inventario",command=lambda:self.refresh(True)).pack(side="left",padx=6);ttk.Button(a,text="Aplicar configuracao",command=self.apply).pack(side="right")
+  b=ttk.Frame(p);b.pack(fill="x",pady=10);ttk.Button(b,text="+ Adicionar cliente",command=self.add).pack(side="left");ttk.Button(b,text="+ Adicionar RTTY/MMTTY",command=self.add_rtty).pack(side="left",padx=6);ttk.Button(b,text="Preparar CW + RTTY",command=self.prepare_cw_rtty).pack(side="left",padx=6);ttk.Button(b,text="Sugestao 2 clientes",command=self.suggest).pack(side="left",padx=6)
+  self.msg=tk.StringVar(value="v0.14: CW/RTTY separados, RTTY COM<=20 e persistencia completa do vector.ini.");ttk.Label(self,textvariable=self.msg,padding=10).pack(side="bottom",fill="x");a=ttk.Frame(self,padding=10);a.pack(side="bottom",fill="x");ttk.Button(a,text="Carregar configuracao atual",command=self.load).pack(side="left");ttk.Button(a,text="Recarregar inventario",command=lambda:self.refresh(True)).pack(side="left",padx=6);ttk.Button(a,text="Aplicar configuracao",command=self.apply).pack(side="right")
  def work(self,title,fn,ok):
   self.progress=Progress(self,title)
   def r():
@@ -132,48 +135,102 @@ class App(tk.Tk):
   while f"COM{n}" in used or (f"COM{n}" in self.active and f"COM{n}" not in e) or (f"COM{n}" in self.busy and f"COM{n}" not in e):n+=1
   return f"COM{n}"
  def add(self):
-  u={x for r in self.rows for x in r.selected()};ca=self.free(15,u);u.add(ca);cv=self.free(101,u);u.add(cv);ka=self.free(15,u);u.add(ka);kv=self.free(101,u);self.addrow(DesiredClient(f"Cliente {len(self.rows)+1}","CAT",ca,cv,"KEYING",ka,kv))
+  u={x for r in self.rows for x in r.selected()};ca=self.free(15,u);u.add(ca);cv=self.free(101,u);u.add(cv);ka=self.free(15,u);u.add(ka);kv=self.free(101,u);self.addrow(DesiredClient(f"Cliente {len(self.rows)+1}","CAT",ca,cv,"KEYING",ka,kv,"DTR","RTS","GENERIC"))
+ def free_rtty(self,used):
+  e=self.existing()
+  order=[18]+[n for n in range(9,21) if n!=18]
+  for n in order:
+   p=f"COM{n}"
+   if p in used:continue
+   if p in self.active and p not in e:continue
+   if p in self.busy and p not in e:continue
+   return p
+  raise RuntimeError("Nenhuma COM entre COM9 e COM20 esta livre para RTTY/MMTTY.")
+ def add_rtty(self):
+  if any("MMTTY" in r.name.get().upper() for r in self.rows):return messagebox.showinfo("RTTY","Ja existe um cliente MMTTY no plano.")
+  u={x for r in self.rows for x in r.selected()};ka=self.free_rtty(u);u.add(ka);kv=self.free(101,u);self.addrow(DesiredClient("MMTTY","NONE","","","KEYING",ka,kv,"RTS","DTR","RTTY"));self.msg.set(f"RTTY/MMTTY preparado em {ka} <-> {kv}: RTS=PTT, DTR=FSK.")
+ def prepare_cw_rtty(self):
+  n=next((r for r in self.rows if r.name.get().strip().upper()=="N1MM"),None)
+  if n is None:return messagebox.showerror("CW + RTTY","Cliente N1MM nao encontrado. Carregue a configuracao atual primeiro.")
+  used={x for r in self.rows if r is not n for x in r.selected()}
+  if "COM30" in used:return messagebox.showerror("CW + RTTY","COM30 ja esta atribuida a outro cliente.")
+  n.ka.set("COM30");n.ptt_input="RTS";n.cw_input="DTR";n.role="CW";n.refresh()
+  m=next((r for r in self.rows if "MMTTY" in r.name.get().upper()),None)
+  if m is None:
+   u={x for r in self.rows for x in r.selected()};u.discard("COM30");ka=self.free_rtty(u);u.add(ka);kv=self.free(101,u);self.addrow(DesiredClient("MMTTY","NONE","","","KEYING",ka,kv,"RTS","DTR","RTTY"));m=self.rows[-1]
+  else:
+   m.ptt_input="RTS";m.cw_input="DTR";m.role="RTTY"
+   if not m.ka.get() or num(m.ka.get())>20:m.ka.set(self.free_rtty({x for r in self.rows if r is not m for x in r.selected()}))
+   m.refresh()
+  self.msg.set(f"Padrao preparado: N1MM CW em COM30; MMTTY RTTY em {m.ka.get()}; RTS=PTT e DTR=KEYING.")
  def suggest(self):self.clear();self.add();self.rows[0].name.set("Log4OM");self.add();self.rows[1].name.set("N1MM")
  def load(self):
   if not CONFIG_PATH.exists():return messagebox.showerror("Configuracao",str(CONFIG_PATH))
   c=configparser.ConfigParser();c.read(CONFIG_PATH,encoding="utf-8-sig");cats=[x.strip().upper() for x in c.get("cat","ports",fallback="").split(",") if x.strip()];keys=[]
   for k,v in c.items("keying") if c.has_section("keying") else []:
    m=CLIENT_RE.match(k);p=[x.strip() for x in v.split(",")]
-   if m and len(p)>=3:keys.append((int(m.group(1)),p[0] if len(p)==4 else f"Cliente {m.group(1)}",p[1].upper() if len(p)==4 else p[0].upper()))
+   if not m or len(p)<3:continue
+   idx=int(m.group(1))
+   if len(p)>=4:name,port,ptt,cw=p[0],p[1].upper(),p[2].upper(),p[3].upper()
+   else:name,port,ptt,cw=f"Cliente {idx}",p[0].upper(),p[1].upper(),p[2].upper()
+   role="RTTY" if "MMTTY" in name.upper() else ("CW" if name.upper()=="N1MM" and ptt=="RTS" and cw=="DTR" else "GENERIC")
+   keys.append((idx,name,port,ptt,cw,role))
   keys.sort();self.clear()
-  for i in range(max(len(cats),len(keys))):cv=cats[i] if i<len(cats) else "";kv=keys[i][2] if i<len(keys) else "";self.addrow(DesiredClient(keys[i][1] if i<len(keys) else f"Cliente {i+1}","CAT" if cv else "NONE",self.other(cv),cv,"KEYING" if kv else "NONE",self.other(kv),kv))
+  for i in range(max(len(cats),len(keys))):
+   cv=cats[i] if i<len(cats) else ""
+   if i<len(keys):_,name,kv,ptt,cw,role=keys[i]
+   else:name,kv,ptt,cw,role=f"Cliente {i+1}","","DTR","RTS","GENERIC"
+   self.addrow(DesiredClient(name,"CAT" if cv else "NONE",self.other(cv),cv,"KEYING" if kv else "NONE",self.other(kv),kv,ptt,cw,role))
  def pairs(self):return [p for r in self.rows for p in r.pairs()]
- def oldnames(self):
-  c=configparser.ConfigParser();c.read(CONFIG_PATH,encoding="utf-8-sig");r={}
+ def desired_config(self):
+  cats=[r.cv.get().upper() for r in self.rows if r.ct.get()!="NONE" and r.cv.get()]
+  keys=[x for i,r in enumerate(self.rows,1) if (x:=r.keying_tuple(i))]
+  return cats,keys
+ def configchanges(self):
+  c=configparser.ConfigParser();c.read(CONFIG_PATH,encoding="utf-8-sig")
+  oldcats=[x.strip().upper() for x in c.get("cat","ports",fallback="").split(",") if x.strip()]
+  oldkeys=[]
   for k,v in c.items("keying") if c.has_section("keying") else []:
    m=CLIENT_RE.match(k);p=[x.strip() for x in v.split(",")]
-   if m:r[int(m.group(1))]=p[0] if len(p)==4 else f"Cliente {m.group(1)}"
-  return r
- def namechanges(self):
-  o=self.oldnames();return [(i,o.get(i,f"Cliente {i}"),r.name.get().strip() or f"Cliente {i}") for i,r in enumerate(self.rows,1) if r.kt.get()!="NONE" and (r.name.get().strip() or f"Cliente {i}")!=o.get(i,f"Cliente {i}")]
+   if not m or len(p)<3:continue
+   idx=int(m.group(1))
+   if len(p)>=4:oldkeys.append((idx,p[0],p[1].upper(),p[2].upper(),p[3].upper()))
+   else:oldkeys.append((idx,f"Cliente {idx}",p[0].upper(),p[1].upper(),p[2].upper()))
+  newcats,newkeys=self.desired_config();changes=[]
+  if oldcats!=newcats:changes.append("Atualizar [cat] ports: "+(", ".join(newcats) or "nenhuma"))
+  if oldkeys!=newkeys:changes.append("Atualizar [keying]: "+("; ".join(f"client{i}={n},{p},{ptt},{cw}" for i,n,p,ptt,cw in newkeys) or "nenhum cliente"))
+  return changes
  def persist(self):
-  desired={i:r.name.get().strip() or f"Cliente {i}" for i,r in enumerate(self.rows,1) if r.kt.get()!="NONE"};out=[];inside=False
-  for line in CONFIG_PATH.read_text(encoding="utf-8-sig").splitlines(True):
-   s=line.strip()
-   if s.startswith("["):inside=s.lower()=="[keying]"
-   if inside:
-    m=KEY_RE.match(line)
-    if m and int(m.group(3)) in desired:
-     p=[x.strip() for x in m.group(5).split(",")];p=([desired[int(m.group(3))]]+p[:3]) if len(p)==3 else [desired[int(m.group(3))]]+p[1:];line=f"{m.group(1)}{m.group(2)}{m.group(4)}{','.join(p)}{m.group(6) or chr(10)}"
+  cats,keys=self.desired_config();raw=CONFIG_PATH.read_text(encoding="utf-8-sig").splitlines(True);out=[];section="";cat_done=False;key_done=False
+  key_lines=[f"client{i} = {n},{p},{ptt},{cw}\n" for i,n,p,ptt,cw in keys]
+  for line in raw:
+   stripped=line.strip()
+   if stripped.startswith("[") and stripped.endswith("]"):
+    if section=="keying" and not key_done:out.extend(key_lines);key_done=True
+    section=stripped[1:-1].strip().lower()
+    out.append(line);continue
+   if section=="cat" and re.match(r"^\s*ports\s*=",line,re.I):
+    nl="\r\n" if line.endswith("\r\n") else "\n";out.append(f"ports = {', '.join(cats)}{nl}");cat_done=True;continue
+   if section=="keying" and KEY_RE.match(line):
+    if not key_done:out.extend(key_lines);key_done=True
+    continue
    out.append(line)
+  if section=="keying" and not key_done:out.extend(key_lines)
   CONFIG_PATH.write_text("".join(out),encoding="utf-8")
  def apply(self):
   if not admin():return messagebox.showerror("Permissao","Execute como Administrador.")
-  d=self.pairs();cur={(p.app_port,p.vector_port):p for p in self.ep};want={(x.app_port,x.vector_port) for x in d};rem=[p for k,p in cur.items() if k not in want];create=[x for x in d if (x.app_port,x.vector_port) not in cur];nc=self.namechanges()
-  if not rem and not create and not nc:return messagebox.showinfo("Sem alteracoes","COMs e nomes ja correspondem ao plano.")
-  s=["Alteracoes propostas:"]+[f"Remover {p.app_port} <-> {p.vector_port}" for p in rem]+[f"Criar {x.app_port} <-> {x.vector_port} ({x.name}/{x.kind})" for x in create]+[f"Renomear client{i}: {a} -> {b}" for i,a,b in nc]
+  for r in self.rows:
+   if r.role=="RTTY" and r.kt.get()!="NONE" and r.ka.get() and num(r.ka.get())>20:return messagebox.showerror("RTTY","MMTTY/RTTY deve usar uma COM de aplicativo entre COM9 e COM20. Ajuste "+r.ka.get()+".")
+  d=self.pairs();cur={(p.app_port,p.vector_port):p for p in self.ep};want={(x.app_port,x.vector_port) for x in d};rem=[p for k,p in cur.items() if k not in want];create=[x for x in d if (x.app_port,x.vector_port) not in cur];cc=self.configchanges()
+  if not rem and not create and not cc:return messagebox.showinfo("Sem alteracoes","COMs e vector.ini ja correspondem ao plano.")
+  s=["Alteracoes propostas:"]+[f"Remover {p.app_port} <-> {p.vector_port}" for p in rem]+[f"Criar {x.app_port} <-> {x.vector_port} ({x.name}/{x.kind})" for x in create]+cc
   if not messagebox.askyesno("Confirmar","\n".join(s)):return
   def worker():
    for p in rem:self.c.remove_pair(p.index)
    for x in create:self.c.create_pair(x.app_port,x.vector_port)
-   if nc:self.persist()
+   if cc:self.persist()
    return self.collect()
-  self.work("Aplicando configuracao",worker,lambda x:(setattr(self,"c",x[0]),setattr(self,"ep",x[1]),setattr(self,"active",x[2]),setattr(self,"busy",x[3]),self.render()))
+  self.work("Aplicando configuracao",worker,lambda x:(setattr(self,"c",x[0]),setattr(self,"ep",x[1]),setattr(self,"active",x[2]),setattr(self,"busy",x[3]),self.render(),self.msg.set("Configuracao aplicada. Reinicie o GADXVectorHub para carregar alteracoes do vector.ini.")))
 if __name__=="__main__":
  if sys.platform!="win32":raise SystemExit("GADX Vector Port Manager requer Windows")
  App().mainloop()
