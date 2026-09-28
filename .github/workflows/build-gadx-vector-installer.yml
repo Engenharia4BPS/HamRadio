@@ -8,7 +8,7 @@ on:
       - '.github/workflows/build-gadx-vector-installer.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -60,3 +60,32 @@ jobs:
             spikes/vector-hub-service/dist/exe/GADX-Vector-Setup-*.exe.sha256
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish GitHub prerelease
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = Get-Content 'spikes/vector-hub-service/installer/release.json' -Raw | ConvertFrom-Json
+          $version = [string]$release.version
+          $tag = "gadx-vector-v$version"
+          $exe = "spikes/vector-hub-service/dist/exe/GADX-Vector-Setup-$version.exe"
+          $sha = "$exe.sha256"
+          $title = "GADX Vector $version"
+
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $exe $sha --clobber --repo "${{ github.repository }}"
+            if ($LASTEXITCODE -ne 0) { throw "gh release upload failed." }
+          }
+          else {
+            $notes = @"
+          Development build of GADX Vector.
+
+          Includes Port Manager v0.15 with CLIENTE / CAT / CW KEYING / FSK KEYING grouping.
+
+          This build is published as a prerelease because clean-VM validation was intentionally skipped.
+          "@
+            gh release create $tag $exe $sha --prerelease --title $title --notes $notes --repo "${{ github.repository }}"
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
+          }
