@@ -270,7 +270,7 @@ class Progress(tk.Toplevel):
 
 
 class Help(tk.Toplevel):
-    TEXT = """GADX VECTOR PORT MANAGER - v0.15
+    TEXT = """GADX VECTOR PORT MANAGER - v0.16
 
 OBJETIVO
 Organizar as portas virtuais do GADX Vector por cliente e por funcao.
@@ -281,19 +281,19 @@ Nome do programa ou integracao, por exemplo LogHX, N1MM ou OmniRig.
 
 CAT
 Porta de controle do radio: frequencia, modo e comandos.
-Aplicativo = porta configurada no programa.
-Vector = outra ponta do par com0com, aberta pelo Vector Hub.
+COM Aplicativo = porta configurada no programa.
+COM Vector = outra ponta do par com0com, aberta pelo Vector Hub.
 
 CW KEYING
-Canal para PTT e CW.
-O tipo CW representa PTT + KEYING.
-O tipo PTT representa somente PTT.
+Canal para PTT e CW. A interface mostra explicitamente as linhas
+PTT e CW, cada uma configuravel como RTS, DTR ou NONE.
 Em novos canais CW, o padrao e:
   RTS = PTT
   DTR = CW KEYING
 
 FSK KEYING
-Canal independente para RTTY/FSK.
+Canal independente para RTTY/FSK. A interface mostra explicitamente
+PTT e FSK, cada um configuravel como RTS, DTR ou NONE.
 Em novos canais FSK, o padrao e:
   RTS = PTT
   DTR = FSK KEYING
@@ -373,6 +373,8 @@ ou uma COM ocupada. Sempre confira o resumo antes de confirmar.
 
 
 class ClientRow:
+    SIGNALS = ("NONE", "DTR", "RTS")
+
     def __init__(self, manager: "App", desired: DesiredClient):
         self.manager = manager
 
@@ -385,43 +387,57 @@ class ClientRow:
         self.cw_type = tk.StringVar(value=desired.cw_type)
         self.cw_app = tk.StringVar(value=desired.cw_app)
         self.cw_vector = tk.StringVar(value=desired.cw_vector)
-        self.cw_ptt_input = desired.cw_ptt_input.upper()
-        self.cw_key_input = desired.cw_key_input.upper()
+        self.cw_ptt_input = tk.StringVar(
+            value=desired.cw_ptt_input.upper()
+            if desired.cw_type != "NONE"
+            else "NONE"
+        )
+        self.cw_key_input = tk.StringVar(
+            value=desired.cw_key_input.upper()
+            if desired.cw_type != "NONE"
+            else "NONE"
+        )
 
         self.fsk_type = tk.StringVar(value=desired.fsk_type)
         self.fsk_app = tk.StringVar(value=desired.fsk_app)
         self.fsk_vector = tk.StringVar(value=desired.fsk_vector)
-        self.fsk_ptt_input = desired.fsk_ptt_input.upper()
-        self.fsk_key_input = desired.fsk_key_input.upper()
+        self.fsk_ptt_input = tk.StringVar(
+            value=desired.fsk_ptt_input.upper()
+            if desired.fsk_type != "NONE"
+            else "NONE"
+        )
+        self.fsk_key_input = tk.StringVar(
+            value=desired.fsk_key_input.upper()
+            if desired.fsk_type != "NONE"
+            else "NONE"
+        )
 
         self.client_widget = ttk.Entry(
             manager.client_group,
             textvariable=self.name,
-            width=17,
+            width=16,
         )
 
-        self.cat_widgets = self._channel_widgets(
+        self.cat_widgets = self._cat_widgets(
             manager.cat_group,
             self.cat_type,
-            ("CAT", "NONE"),
             self.cat_app,
             self.cat_vector,
-            "cat",
         )
 
-        self.cw_widgets = self._channel_widgets(
+        self.cw_widgets = self._keying_widgets(
             manager.cw_group,
-            self.cw_type,
-            ("CW", "PTT", "NONE"),
+            self.cw_ptt_input,
+            self.cw_key_input,
             self.cw_app,
             self.cw_vector,
             "cw",
         )
 
-        self.fsk_widgets = self._channel_widgets(
+        self.fsk_widgets = self._keying_widgets(
             manager.fsk_group,
-            self.fsk_type,
-            ("FSK", "NONE"),
+            self.fsk_ptt_input,
+            self.fsk_key_input,
             self.fsk_app,
             self.fsk_vector,
             "fsk",
@@ -440,20 +456,66 @@ class ClientRow:
 
         self.refresh_choices()
 
-    def _channel_widgets(
+    def _cat_widgets(self, parent, type_var, app_var, vector_var):
+        type_combo = ttk.Combobox(
+            parent,
+            textvariable=type_var,
+            values=("CAT", "NONE"),
+            width=7,
+            state="readonly",
+        )
+        app_combo = ttk.Combobox(
+            parent,
+            textvariable=app_var,
+            width=9,
+            state="readonly",
+        )
+        arrow = ttk.Label(parent, text="↔")
+        vector_combo = ttk.Combobox(
+            parent,
+            textvariable=vector_var,
+            width=9,
+            state="readonly",
+        )
+
+        app_combo.config(
+            postcommand=lambda: self._fill_combo(
+                app_combo, "app", app_var.get()
+            )
+        )
+        vector_combo.config(
+            postcommand=lambda: self._fill_combo(
+                vector_combo, "vector", vector_var.get()
+            )
+        )
+
+        self.manager.tip(type_combo, "CAT ou NONE.")
+        self.manager.tip(app_combo, "COM configurada no aplicativo para CAT.")
+        self.manager.tip(vector_combo, "COM interna de CAT aberta pelo Vector.")
+
+        return (type_combo, app_combo, arrow, vector_combo)
+
+    def _keying_widgets(
         self,
         parent,
-        type_var,
-        types,
+        ptt_var,
+        key_var,
         app_var,
         vector_var,
         role,
     ):
-        type_combo = ttk.Combobox(
+        ptt_combo = ttk.Combobox(
             parent,
-            textvariable=type_var,
-            values=types,
-            width=8,
+            textvariable=ptt_var,
+            values=self.SIGNALS,
+            width=6,
+            state="readonly",
+        )
+        key_combo = ttk.Combobox(
+            parent,
+            textvariable=key_var,
+            values=self.SIGNALS,
+            width=6,
             state="readonly",
         )
         app_combo = ttk.Combobox(
@@ -485,23 +547,64 @@ class ClientRow:
             )
         )
 
-        if role == "cat":
-            self.manager.tip(type_combo, "CAT ou NONE.")
-            self.manager.tip(app_combo, "COM usada pelo aplicativo para CAT.")
-            self.manager.tip(vector_combo, "COM interna de CAT aberta pelo Vector.")
-        elif role == "cw":
-            self.manager.tip(type_combo, "CW = PTT + CW keying; PTT = somente PTT.")
-            self.manager.tip(app_combo, "COM usada pelo aplicativo para CW/PTT.")
-            self.manager.tip(vector_combo, "COM interna de CW/PTT aberta pelo Vector.")
-        else:
-            self.manager.tip(type_combo, "FSK = PTT + RTTY/FSK keying.")
-            self.manager.tip(
-                app_combo,
-                "COM usada pelo MMTTY/EXTFSK. Limitada a COM9..COM20.",
-            )
-            self.manager.tip(vector_combo, "COM interna de FSK aberta pelo Vector.")
+        ptt_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _event: self._sync_keying_type(role),
+            add="+",
+        )
+        key_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _event: self._sync_keying_type(role),
+            add="+",
+        )
 
-        return (type_combo, app_combo, arrow, vector_combo)
+        self.manager.tip(
+            ptt_combo,
+            "Linha usada pelo aplicativo para PTT: RTS, DTR ou NONE.",
+        )
+        self.manager.tip(
+            key_combo,
+            (
+                "Linha usada para CW keying: RTS, DTR ou NONE."
+                if role == "cw"
+                else "Linha usada para FSK/RTTY keying: RTS, DTR ou NONE."
+            ),
+        )
+        self.manager.tip(
+            app_combo,
+            (
+                "COM Aplicativo usada para CW/PTT."
+                if role == "cw"
+                else "COM Aplicativo usada pelo MMTTY/EXTFSK. Limitada a COM9..COM20."
+            ),
+        )
+        self.manager.tip(
+            vector_combo,
+            (
+                "COM Vector interna de CW/PTT."
+                if role == "cw"
+                else "COM Vector interna de FSK/RTTY."
+            ),
+        )
+
+        return (ptt_combo, key_combo, app_combo, arrow, vector_combo)
+
+    def _sync_keying_type(self, role):
+        if role == "cw":
+            ptt = self.cw_ptt_input.get().upper()
+            key = self.cw_key_input.get().upper()
+            if ptt == "NONE" and key == "NONE":
+                self.cw_type.set("NONE")
+            elif key == "NONE":
+                self.cw_type.set("PTT")
+            else:
+                self.cw_type.set("CW")
+        else:
+            ptt = self.fsk_ptt_input.get().upper()
+            key = self.fsk_key_input.get().upper()
+            self.fsk_type.set(
+                "NONE" if ptt == "NONE" and key == "NONE" else "FSK"
+            )
 
     def _fill_combo(self, combo, side, current):
         combo["values"] = self.manager.port_choices(side, current, self)
@@ -515,11 +618,15 @@ class ClientRow:
             sticky="ew",
         )
 
-        for widgets, group in (
-            (self.cat_widgets, self.manager.cat_group),
-            (self.cw_widgets, self.manager.cw_group),
-            (self.fsk_widgets, self.manager.fsk_group),
-        ):
+        for column, widget in enumerate(self.cat_widgets):
+            widget.grid(
+                row=row_number,
+                column=column,
+                padx=4,
+                pady=4,
+            )
+
+        for widgets in (self.cw_widgets, self.fsk_widgets):
             for column, widget in enumerate(widgets):
                 widget.grid(
                     row=row_number,
@@ -546,11 +653,11 @@ class ClientRow:
         self._fill_combo(self.cat_widgets[1], "app", self.cat_app.get())
         self._fill_combo(self.cat_widgets[3], "vector", self.cat_vector.get())
 
-        self._fill_combo(self.cw_widgets[1], "app", self.cw_app.get())
-        self._fill_combo(self.cw_widgets[3], "vector", self.cw_vector.get())
+        self._fill_combo(self.cw_widgets[2], "app", self.cw_app.get())
+        self._fill_combo(self.cw_widgets[4], "vector", self.cw_vector.get())
 
-        self._fill_combo(self.fsk_widgets[1], "fsk_app", self.fsk_app.get())
-        self._fill_combo(self.fsk_widgets[3], "vector", self.fsk_vector.get())
+        self._fill_combo(self.fsk_widgets[2], "fsk_app", self.fsk_app.get())
+        self._fill_combo(self.fsk_widgets[4], "vector", self.fsk_vector.get())
 
     def selected_ports(self):
         values = (
@@ -604,18 +711,12 @@ class ClientRow:
         result = []
 
         if self.cw_type.get() != "NONE":
-            ptt = self.cw_ptt_input.upper()
-            key = self.cw_key_input.upper()
-
-            if self.cw_type.get() == "PTT":
-                key = "NONE"
-
             result.append(
                 (
                     name,
                     self.cw_vector.get().upper(),
-                    ptt,
-                    key,
+                    self.cw_ptt_input.get().upper(),
+                    self.cw_key_input.get().upper(),
                 )
             )
 
@@ -624,8 +725,8 @@ class ClientRow:
                 (
                     f"{name} FSK",
                     self.fsk_vector.get().upper(),
-                    self.fsk_ptt_input.upper(),
-                    self.fsk_key_input.upper(),
+                    self.fsk_ptt_input.get().upper(),
+                    self.fsk_key_input.get().upper(),
                 )
             )
 
@@ -636,8 +737,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("GADX Vector Port Manager")
-        self.geometry("1480x760")
-        self.minsize(1260, 650)
+        self.geometry("1540x800")
+        self.minsize(1240, 680)
 
         self.rows = []
         self.com0com = None
@@ -687,6 +788,43 @@ class App(tk.Tk):
         )
         desired.pack(fill="both", expand=True, padx=10, pady=8)
 
+        radio = ttk.LabelFrame(
+            desired,
+            text="RADIO / SAIDAS FISICAS",
+            padding=8,
+        )
+        radio.pack(fill="x", pady=(0, 8))
+
+        rig_box = ttk.LabelFrame(radio, text="CAT / HAMLIB", padding=8)
+        key_box = ttk.LabelFrame(radio, text="KEYING FISICO", padding=8)
+        rig_box.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        key_box.pack(side="left", fill="x", expand=True, padx=(5, 0))
+
+        self.rig_physical_title = tk.StringVar(value="COM FISICA: ...")
+        self.rig_physical_detail = tk.StringVar(value="Hamlib: ...")
+        self.key_physical_title = tk.StringVar(value="COM FISICA: ...")
+        self.key_physical_detail = tk.StringVar(value="KEYING: ... | PTT: ...")
+
+        ttk.Label(
+            rig_box,
+            textvariable=self.rig_physical_title,
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="center")
+        ttk.Label(
+            rig_box,
+            textvariable=self.rig_physical_detail,
+        ).pack(anchor="center", pady=(2, 0))
+
+        ttk.Label(
+            key_box,
+            textvariable=self.key_physical_title,
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="center")
+        ttk.Label(
+            key_box,
+            textvariable=self.key_physical_detail,
+        ).pack(anchor="center", pady=(2, 0))
+
         groups = ttk.Frame(desired)
         groups.pack(fill="x")
 
@@ -704,8 +842,8 @@ class App(tk.Tk):
 
         groups.columnconfigure(0, weight=1)
         groups.columnconfigure(1, weight=2)
-        groups.columnconfigure(2, weight=2)
-        groups.columnconfigure(3, weight=2)
+        groups.columnconfigure(2, weight=3)
+        groups.columnconfigure(3, weight=3)
 
         ttk.Label(
             self.client_group,
@@ -713,19 +851,29 @@ class App(tk.Tk):
             font=("Segoe UI", 9, "bold"),
         ).grid(row=0, column=0, padx=5, pady=(0, 4))
 
-        for group in (self.cat_group, self.cw_group, self.fsk_group):
-            ttk.Label(group, text="Tipo", font=("Segoe UI", 9, "bold")).grid(
-                row=0, column=0, padx=4, pady=(0, 4)
-            )
-            ttk.Label(group, text="Aplicativo", font=("Segoe UI", 9, "bold")).grid(
-                row=0, column=1, padx=4, pady=(0, 4)
-            )
-            ttk.Label(group, text="", font=("Segoe UI", 9, "bold")).grid(
-                row=0, column=2
-            )
-            ttk.Label(group, text="Vector", font=("Segoe UI", 9, "bold")).grid(
-                row=0, column=3, padx=4, pady=(0, 4)
-            )
+        # CAT: Tipo | COM Aplicativo | <-> | COM Vector
+        for column, label in enumerate(("Tipo", "COM Aplicativo", "", "COM Vector")):
+            ttk.Label(
+                self.cat_group,
+                text=label,
+                font=("Segoe UI", 9, "bold"),
+            ).grid(row=0, column=column, padx=4, pady=(0, 4))
+
+        # CW: PTT | CW | COM Aplicativo | <-> | COM Vector
+        for column, label in enumerate(("PTT", "CW", "COM Aplicativo", "", "COM Vector")):
+            ttk.Label(
+                self.cw_group,
+                text=label,
+                font=("Segoe UI", 9, "bold"),
+            ).grid(row=0, column=column, padx=4, pady=(0, 4))
+
+        # FSK: PTT | FSK | COM Aplicativo | <-> | COM Vector
+        for column, label in enumerate(("PTT", "FSK", "COM Aplicativo", "", "COM Vector")):
+            ttk.Label(
+                self.fsk_group,
+                text=label,
+                font=("Segoe UI", 9, "bold"),
+            ).grid(row=0, column=column, padx=4, pady=(0, 4))
 
         buttons = ttk.Frame(desired)
         buttons.pack(fill="x", pady=10)
@@ -750,8 +898,8 @@ class App(tk.Tk):
 
         self.message = tk.StringVar(
             value=(
-                "v0.15: interface agrupada por CLIENTE / CAT / CW KEYING / "
-                "FSK KEYING; FSK limitado a COM<=20."
+                "v0.16: mapeamento PTT/CW/FSK visivel; COM Aplicativo / COM Vector; "
+                "saidas fisicas do radio no topo."
             )
         )
         ttk.Label(self, textvariable=self.message, padding=10).pack(
@@ -819,6 +967,7 @@ class App(tk.Tk):
             self.com0com, self.existing_pairs, self.active, self.busy = result
             self.setupc_text.set(f"com0com: {self.com0com.exe}")
             self.render_inventory()
+            self.refresh_physical_summary()
 
             for row in self.rows:
                 row.refresh_choices()
@@ -850,6 +999,51 @@ class App(tk.Tk):
 
         self.inventory_text.delete("1.0", "end")
         self.inventory_text.insert("1.0", "\n".join(lines))
+
+    def detect_rig_physical_port(self):
+        # Prefer a serial explicitly described as CI-V. This keeps the UI useful
+        # without making the Vector runtime depend on the rigctld serial path.
+        candidates = []
+        for port, description in self.active.items():
+            upper = description.upper()
+            if "CI-V" in upper:
+                return port
+            if "ICOM" in upper and "SERIAL PORT A" in upper:
+                candidates.append(port)
+
+        if candidates:
+            return sorted(candidates, key=com_number)[0]
+
+        return ""
+
+    def refresh_physical_summary(self, config=None):
+        if config is None:
+            config = configparser.ConfigParser()
+            if CONFIG_PATH.exists():
+                config.read(CONFIG_PATH, encoding="utf-8-sig")
+
+        rig_host = config.get("rig", "host", fallback="127.0.0.1")
+        rig_port = config.get("rig", "port", fallback="4532")
+        rig_physical = config.get("rig", "physical_port", fallback="").upper()
+        if not rig_physical:
+            rig_physical = self.detect_rig_physical_port()
+
+        key_port = config.get("radio_keying", "port", fallback="").upper()
+        ptt_line = config.get("radio_keying", "ptt_line", fallback="RIGCTLD").upper()
+        key_line = config.get("radio_keying", "cw_line", fallback="").upper()
+
+        self.rig_physical_title.set(
+            f"COM FISICA: {rig_physical}" if rig_physical else "COM FISICA: via rigctld"
+        )
+        self.rig_physical_detail.set(f"Hamlib: {rig_host}:{rig_port}")
+
+        self.key_physical_title.set(
+            f"COM FISICA: {key_port}" if key_port else "COM FISICA: nao configurada"
+        )
+        key_label = key_line or "NONE"
+        self.key_physical_detail.set(
+            f"KEYING: {key_label} | PTT: {ptt_line or 'NONE'}"
+        )
 
     def existing_ports(self):
         return {
@@ -1071,6 +1265,7 @@ class App(tk.Tk):
 
         config = configparser.ConfigParser()
         config.read(CONFIG_PATH, encoding="utf-8-sig")
+        self.refresh_physical_summary(config)
 
         cat_ports = [
             item.strip().upper()
@@ -1102,8 +1297,8 @@ class App(tk.Tk):
                 cw_vector = ""
                 cw_app = ""
                 cw_type = "NONE"
-                cw_ptt = "RTS"
-                cw_key = "DTR"
+                cw_ptt = "NONE"
+                cw_key = "NONE"
 
             if index < len(cat_ports):
                 cat_vector = cat_ports[index]
@@ -1158,8 +1353,8 @@ class App(tk.Tk):
             target.fsk_type.set("FSK")
             target.fsk_vector.set(channel.vector_port)
             target.fsk_app.set(self.other_end(channel.vector_port))
-            target.fsk_ptt_input = channel.ptt_input
-            target.fsk_key_input = channel.key_input
+            target.fsk_ptt_input.set(channel.ptt_input)
+            target.fsk_key_input.set(channel.key_input)
             target.refresh_choices()
 
         self.message.set(
@@ -1200,8 +1395,8 @@ class App(tk.Tk):
 
         n1mm.cw_type.set("CW")
         n1mm.cw_app.set("COM30")
-        n1mm.cw_ptt_input = "RTS"
-        n1mm.cw_key_input = "DTR"
+        n1mm.cw_ptt_input.set("RTS")
+        n1mm.cw_key_input.set("DTR")
 
         if not n1mm.cw_vector.get():
             used = {
@@ -1226,8 +1421,8 @@ class App(tk.Tk):
             used.add(n1mm.fsk_app.get())
             n1mm.fsk_vector.set(self.next_vector_port(used))
 
-        n1mm.fsk_ptt_input = "RTS"
-        n1mm.fsk_key_input = "DTR"
+        n1mm.fsk_ptt_input.set("RTS")
+        n1mm.fsk_key_input.set("DTR")
         n1mm.refresh_choices()
 
         self.message.set(
