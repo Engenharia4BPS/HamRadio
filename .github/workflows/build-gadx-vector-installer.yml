@@ -91,6 +91,17 @@ jobs:
           $sha = "$exe.sha256"
           $zip = "spikes/vector-hub-service/dist/exe/GADX-Vector-Setup-$version.zip"
           $title = "GADX Vector $version"
+          $notes = @"
+          Development build of GADX Vector.
+
+          Includes Port Manager v0.16 with:
+          - CLIENTE / CAT / CW KEYING / FSK KEYING grouping
+          - visible PTT/CW/FSK line mapping
+          - COM Aplicativo / COM Vector naming
+          - physical CAT/Hamlib and keying summary at the top
+
+          This build is published as a prerelease because clean-VM validation was intentionally skipped.
+          "@
 
           $savedErrorAction = $ErrorActionPreference
           $ErrorActionPreference = 'SilentlyContinue'
@@ -101,15 +112,10 @@ jobs:
           if ($releaseExists) {
             gh release upload $tag $exe $sha $zip --clobber --repo "${{ github.repository }}"
             if ($LASTEXITCODE -ne 0) { throw "gh release upload failed." }
+            gh release edit $tag --title $title --notes $notes --prerelease --repo "${{ github.repository }}"
+            if ($LASTEXITCODE -ne 0) { throw "gh release edit failed." }
           }
           else {
-            $notes = @"
-          Development build of GADX Vector.
-
-          Includes Port Manager v0.15 with CLIENTE / CAT / CW KEYING / FSK KEYING grouping.
-
-          This build is published as a prerelease because clean-VM validation was intentionally skipped.
-          "@
             gh release create $tag $exe $sha $zip --prerelease --title $title --notes $notes --repo "${{ github.repository }}"
             if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
           }
