@@ -39,6 +39,33 @@ function Write-Utf8NoBom([string]$Path,[string]$Text) {
     [System.IO.File]::WriteAllText($Path,$Text,$utf8)
 }
 
+function Assert-PayloadMirror {
+    $ProductRoot = Split-Path -Parent $InstallerRoot
+    $pairs = @(
+        @{ Source = (Join-Path $ProductRoot "app\vector_hub.py"); Payload = (Join-Path $InstallerRoot "payload\app\vector_hub.py") },
+        @{ Source = (Join-Path $ProductRoot "app\ts2000.py"); Payload = (Join-Path $InstallerRoot "payload\app\ts2000.py") },
+        @{ Source = (Join-Path $ProductRoot "service\vector_service.py"); Payload = (Join-Path $InstallerRoot "payload\service\vector_service.py") },
+        @{ Source = (Join-Path $ProductRoot "tools\port_manager.py"); Payload = (Join-Path $InstallerRoot "payload\tools\port_manager.py") }
+    )
+
+    foreach ($pair in $pairs) {
+        if (-not (Test-Path $pair.Source -PathType Leaf)) {
+            throw "Canonical product file is missing: $($pair.Source)"
+        }
+        if (-not (Test-Path $pair.Payload -PathType Leaf)) {
+            throw "Installer payload mirror is missing: $($pair.Payload)"
+        }
+
+        $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $pair.Source).Hash
+        $payloadHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $pair.Payload).Hash
+        if ($sourceHash -ne $payloadHash) {
+            throw "Installer payload drift detected: $($pair.Payload) does not match $($pair.Source). Sync payload before building a release."
+        }
+    }
+
+    Write-Host "Installer payload mirror: OK" -ForegroundColor Green
+}
+
 $sourceCommit = $null
 $sourceResolution = $null
 if (Test-Path $SourceLockPath -PathType Leaf) {
@@ -75,6 +102,8 @@ $tempRoot = Join-Path $env:TEMP ("GADX-Vector-package-" + [Guid]::NewGuid().ToSt
 $stageRoot = Join-Path $tempRoot $packageName
 $zipPath = Join-Path $OutputDir ($packageName + ".zip")
 $shaPath = $zipPath + ".sha256"
+
+Assert-PayloadMirror
 
 Write-Host ""
 Write-Host "GADX Vector - D8D release package builder" -ForegroundColor Cyan
