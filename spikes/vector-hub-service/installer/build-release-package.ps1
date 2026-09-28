@@ -39,6 +39,26 @@ function Write-Utf8NoBom([string]$Path,[string]$Text) {
     [System.IO.File]::WriteAllText($Path,$Text,$utf8)
 }
 
+function Assert-PowerShellSyntax {
+    $files = @(Get-ChildItem -LiteralPath $InstallerRoot -Recurse -File -Filter '*.ps1')
+    foreach ($file in $files) {
+        $tokens = $null
+        $errors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile(
+            $file.FullName,
+            [ref]$tokens,
+            [ref]$errors
+        )
+        if ($errors -and $errors.Count -gt 0) {
+            $detail = ($errors | ForEach-Object {
+                "$($_.Extent.File):$($_.Extent.StartLineNumber):$($_.Extent.StartColumnNumber) $($_.Message)"
+            }) -join "; "
+            throw "PowerShell syntax validation failed: $detail"
+        }
+    }
+    Write-Host "PowerShell syntax validation: OK" -ForegroundColor Green
+}
+
 function Assert-PayloadMirror {
     $ProductRoot = Split-Path -Parent $InstallerRoot
     $pairs = @(
@@ -103,6 +123,7 @@ $stageRoot = Join-Path $tempRoot $packageName
 $zipPath = Join-Path $OutputDir ($packageName + ".zip")
 $shaPath = $zipPath + ".sha256"
 
+Assert-PowerShellSyntax
 Assert-PayloadMirror
 
 Write-Host ""
