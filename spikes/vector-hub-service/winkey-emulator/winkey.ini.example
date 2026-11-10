@@ -1,0 +1,34 @@
+; GADX WinKey Emulator - independent experimental configuration.
+; This file is NOT read by GADXVectorHub and does not alter vector.ini.
+
+[winkey]
+; Use only the Vector side of a NEW, dedicated virtual pair.
+; Example pair: N1MM COM40 <-> this emulator COM140.
+port = COM140
+baud = 1200
+; Small silence that terminates an N1MM ASCII batch before it is sent to rigctld.
+text_gap_ms = 15
+max_message_chars = 240
+; WK2-compatible revision value returned after ADMIN/OPEN (0x00 0x02).
+firmware_revision = 23
+initial_wpm = 28
+min_wpm = 5
+max_wpm = 99
+
+[rigctld]
+host = 127.0.0.1
+port = 4532
+timeout_ms = 1500
+
+[safety]
+; Keep false while verifying the N1MM handshake and log.  Set true only for
+; the controlled over-the-air test after rigctld is confirmed to target the
+; intended radio.
+allow_transmit = false
+
+[logging]
+; True records decoded message text in stdout for the initial field test.
+; Set false if callsigns/exchanges must not be stored in the console log.
+log_text = true
+; Diagnostic only: logs every byte arriving from N1MM.
+protocol_trace = false

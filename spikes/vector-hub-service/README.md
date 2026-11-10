@@ -29,6 +29,11 @@ spikes/vector-hub-service/
 │   └── ts2000.py
 ├── config/
 │   └── vector.ini
+├── winkey-emulator/
+│   ├── winkey_emulator.py
+│   ├── winkey.ini.example
+│   ├── run-winkey-emulator.ps1
+│   └── README.md
 ├── service/
 │   ├── vector_service.py
 │   ├── install-service.ps1
@@ -53,6 +58,12 @@ spikes/vector-hub-service/
         ├── service/
         └── tools/
 ```
+
+## Protótipo WinKey/N1MM isolado
+
+`winkey-emulator/` e uma prova experimental independente para o N1MM entregar texto CW por uma COM virtual dedicada e o processo converter esse texto em `send_morse` do rigctld.
+
+Ele nao faz parte do `GADXVectorHub`, do Windows Service nem do instalador D1-D8. Em particular, nao le/escreve `vector.ini`, nao abre a COM fisica de keying e nao altera o fluxo CAT/PTT/CW/FSK validado. O roteiro de instalacao, validacao com N1MM e rollback fica em [`winkey-emulator/README.md`](winkey-emulator/README.md).
 
 ---
 
