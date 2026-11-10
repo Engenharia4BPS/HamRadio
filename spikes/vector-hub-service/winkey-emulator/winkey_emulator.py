@@ -482,10 +482,19 @@ class WinKeyProtocol:
         elif kind == "admin_calibrate":
             LOG.debug("WinKey calibration byte accepted")
         elif kind == "pointer":
-            if values[0] == 3:
+            if values[0] in {1, 2}:
+                # The input-pointer move commands carry a third byte: the new
+                # buffer position.  N1MM emits <16><02><00> before buffered
+                # speed/text.  Leaving that position byte in the stream made
+                # it look like ADMIN and caused the first CW character to be
+                # consumed as a pointer command.
+                self._pending = ("pointer_position", 1, [])
+            elif values[0] == 3:
                 self._pending = ("pointer_nulls", 1, [])
             else:
                 LOG.debug("WinKey pointer command %d accepted", values[0])
+        elif kind == "pointer_position":
+            LOG.debug("WinKey pointer position %d accepted", values[0])
         elif kind == "pointer_nulls":
             LOG.debug("WinKey pointer null padding %d accepted", values[0])
         else:
