@@ -253,7 +253,15 @@ class RigctldMorseBridge:
     def abort(self, reason: str) -> None:
         with self._generation_lock:
             self._generation += 1
+        now = time.monotonic()
         with self._busy_lock:
+            # N1MM emits CLEAR BUFFER before every function-key message and
+            # when it closes the WinKey port.  A stop request is meaningful
+            # only while the most recent `b` is still expected to be keyed.
+            # Some rigctld/backend combinations do not treat a late
+            # stop_morse as a harmless no-op, so never send one after the
+            # locally tracked CW interval has elapsed.
+            remote_message_active = now < self._busy_until
             self._busy_until = 0.0
         LOG.info("CW abort requested: %s", reason)
         if not self.settings.allow_transmit:
@@ -262,10 +270,13 @@ class RigctldMorseBridge:
         try:
             with self._wire_lock:
                 # Do not send a stop command merely because the emulator could
-                # not open its COM port or N1MM cleared an empty buffer.  A
-                # stop is only relevant after this process has attempted `b`.
+                # not open its COM port, N1MM cleared an empty buffer, or a
+                # previous message has already completed. A stop is relevant
+                # only after this process has sent an active `b` request.
                 with self._activity_lock:
-                    if not self._remote_activity:
+                    if not self._remote_activity or not remote_message_active:
+                        self._remote_activity = False
+                        LOG.info("CW abort skipped: no active remote message")
                         return
                     self._remote_activity = False
                 self.transport.command("0xbb")
