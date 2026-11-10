@@ -103,6 +103,19 @@ class RigctldMorseBridgeTests(unittest.TestCase):
 
         self.assertEqual(self.server.commands, ["L KEYSPD 28\n", "b TEST\n", "0xbb\n"])
 
+    def test_abort_does_not_stop_a_message_that_has_already_completed(self):
+        self.bridge.submit_text("E", 28)
+        self.wait_for_commands(1)
+
+        # Simulate an N1MM CLEAR BUFFER or host close after the estimated CW
+        # interval.  It must not issue a stale 0xbb to the rigctld backend.
+        with self.bridge._busy_lock:
+            self.bridge._busy_until = time.monotonic() - 0.01
+        self.bridge.abort("late clear buffer")
+        time.sleep(0.05)
+
+        self.assertEqual(self.server.commands, ["b E\n"])
+
 
 if __name__ == "__main__":
     unittest.main()
