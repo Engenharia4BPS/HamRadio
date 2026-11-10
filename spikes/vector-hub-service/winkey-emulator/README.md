@@ -28,6 +28,7 @@ Implementado:
 - `CLEAR BUFFER` (`0x0A`), `PAUSE` e fim da sessão em `0xbb` (`stop_morse`);
 - consultas de status e speed-pot suficientes para o handshake; o bit `BUSY` é estimado a partir do texto/WPM;
 - eventos WinKey de `BUSY`/idle e, quando o N1MM habilita esse modo, eco serial de cada caractere segundo temporização Morse estimada;
+- comandos de ponteiro que o N1MM usa antes de mensagens com alteração buffered de velocidade;
 - parsing seguro de comandos comuns que ainda não têm mapeamento, para que seus parâmetros não virem texto CW.
 
 Intencionalmente fora de escopo nesta prova: paddle físico/por software, tune/key-down, PTT via WinKey, weighting, Farnsworth, timing de waits e posição de alterações de velocidade dentro de uma mensagem. Esses recursos não acionam PTT, DTR, RTS ou o CW físico do Vector.
