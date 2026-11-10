@@ -25,7 +25,7 @@ Implementado:
 - handshake WinKey usado pelo N1MM: `ADMIN/ECHO` e `ADMIN/OPEN`, com revisão WK2 configurável;
 - texto ASCII buffered, agrupado após `15 ms` de silêncio por padrão, em um único `b TEXTO`;
 - velocidade WinKey imediata, buffered e `Load Defaults`, em `L KEYSPD <WPM>`;
-- `CLEAR BUFFER` (`0x0A`), `PAUSE` e fim da sessão em `0xbb` (`stop_morse`);
+- `CLEAR BUFFER` (`0x0A`), `PAUSE` e fim da sessão em `0xbb` (`stop_morse`) somente enquanto houver CW ainda em andamento;
 - consultas de status e speed-pot suficientes para o handshake; o bit `BUSY` é estimado a partir do texto/WPM;
 - eventos WinKey de `BUSY`/idle e, quando o N1MM habilita esse modo, eco serial de cada caractere segundo temporização Morse estimada;
 - comandos de ponteiro que o N1MM usa antes de mensagens com alteração buffered de velocidade;
@@ -116,12 +116,12 @@ Teste `Esc` no N1MM durante uma mensagem mais longa: o log deve indicar `CW abor
 | 4 | Confirmar host/porta do rigctld e habilitar `allow_transmit=true` | apenas depois de revisão manual | Opt-in explícito |
 | 5 | Enviar `TEST` em carga/frequência de teste | rigctld recebe `L KEYSPD` e `b TEST`; rádio gera CW | Vector continua ativo e sem alteração |
 | 6 | Iniciar mensagem longa e pressionar `Esc` | `0xbb` interrompe o CW remoto | Não toca RTS/DTR do Vector |
-| 7 | Fechar o emulador (`Ctrl+C`) após um envio | `0xbb` best-effort; processo encerra | Serviço e INI do Vector intactos |
+| 7 | Fechar o emulador (`Ctrl+C`) durante um envio | `0xbb` best-effort; processo encerra | Serviço e INI do Vector intactos |
 | 8 | Retornar N1MM à COM/método de CW anterior | CW físico original funciona como antes | Rollback sem instalação |
 
 ## Rollback
 
-1. Feche o emulador (`Ctrl+C`). Se ele tiver enviado CW neste processo, solicita `stop_morse` como medida de segurança; se nunca enviou, não toca no rigctld.
+1. Feche o emulador (`Ctrl+C`). Se houver CW em andamento, solicita `stop_morse` como medida de segurança; depois do término, não envia um abort tardio ao rigctld.
 2. No N1MM, desmarque WinKey/COM40 ou retorne à porta CW anterior.
 3. Se desejar, rode `setupc.exe list`, confirme o índice do par `COM40 <-> COM140` e remova somente esse índice com `setupc.exe remove <índice>`. Não use o Port Manager para remover este par independente.
 4. Apague `C:\Ham\GADX-WinKey-Emulator`.
