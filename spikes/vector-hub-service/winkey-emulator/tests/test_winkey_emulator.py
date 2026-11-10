@@ -128,6 +128,19 @@ class WinKeyProtocolTests(unittest.TestCase):
         self.assertAlmostEqual(duration, 0.78, places=2)
         self.assertEqual(echoes, [("T", 0.18), ("U", 0.78)])
 
+    def test_n1mm_pointer_append_keeps_the_first_cw_character(self):
+        protocol = self.make_protocol()
+        self.open_host(protocol)
+        # Captured from N1MM: clear, reset pointer, append at position zero,
+        # buffered 22 WPM, then the F3 text "TU".
+        for byte in (0x0A, 0x16, 0x00, 0x16, 0x02, 0x00, 0x1C, 22, ord("T"), ord("U")):
+            protocol.feed(byte)
+        protocol.flush_if_idle(now=time.monotonic() + 1)
+        self.assertEqual(
+            self.bridge.actions,
+            [("abort", "WinKey clear buffer"), ("speed", 22), ("text", "TU", 22)],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
