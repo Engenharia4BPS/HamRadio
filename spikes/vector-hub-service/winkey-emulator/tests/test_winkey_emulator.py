@@ -117,7 +117,9 @@ class WinKeyProtocolTests(unittest.TestCase):
         for byte in b"TU":
             protocol.feed(byte)
         protocol.flush_if_idle(now=time.monotonic() + 1)
-        time.sleep(0.8)
+        # "TU" at 28 WPM takes roughly 0.56 s. Leave scheduler headroom for
+        # timer delivery on a busy Windows host.
+        time.sleep(1.0)
         self.assertIn(b"\xC4", self.responses)
         self.assertIn(b"T", self.responses)
         self.assertIn(b"U", self.responses)
