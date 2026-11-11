@@ -72,7 +72,7 @@ class RigctldMorseBridgeTests(unittest.TestCase):
                 serial_port="COM140", serial_baud=1200, text_gap_seconds=0.015,
                 max_message_chars=240, firmware_revision=23, initial_wpm=28,
                 min_wpm=5, max_wpm=99, rig_host=host, rig_port=port,
-                rig_timeout_seconds=1, allow_transmit=True, log_text=True, protocol_trace=False,
+                rig_timeout_seconds=1, abort_mode="stop_morse", allow_transmit=True, log_text=True, protocol_trace=False,
             )
         )
 
@@ -115,6 +115,28 @@ class RigctldMorseBridgeTests(unittest.TestCase):
         time.sleep(0.05)
 
         self.assertEqual(self.server.commands, ["b E\n"])
+
+    def test_abort_mode_none_never_sends_stop_morse(self):
+        host, port = self.server.server_address
+        bridge = RigctldMorseBridge(
+            Settings(
+                serial_port="COM140", serial_baud=1200, text_gap_seconds=0.015,
+                max_message_chars=240, firmware_revision=23, initial_wpm=28,
+                min_wpm=5, max_wpm=99, rig_host=host, rig_port=port,
+                rig_timeout_seconds=1, abort_mode="none", allow_transmit=True,
+                log_text=True, protocol_trace=False,
+            )
+        )
+        try:
+            bridge.submit_text("TEST", 28)
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline and not self.server.commands:
+                time.sleep(0.01)
+            bridge.abort("no remote stop")
+            time.sleep(0.05)
+            self.assertEqual(self.server.commands, ["b TEST\n"])
+        finally:
+            bridge.close()
 
 
 if __name__ == "__main__":
