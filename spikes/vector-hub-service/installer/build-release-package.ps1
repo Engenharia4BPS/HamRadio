@@ -65,7 +65,10 @@ function Assert-PayloadMirror {
         @{ Source = (Join-Path $ProductRoot "app\vector_hub.py"); Payload = (Join-Path $InstallerRoot "payload\app\vector_hub.py") },
         @{ Source = (Join-Path $ProductRoot "app\ts2000.py"); Payload = (Join-Path $InstallerRoot "payload\app\ts2000.py") },
         @{ Source = (Join-Path $ProductRoot "service\vector_service.py"); Payload = (Join-Path $InstallerRoot "payload\service\vector_service.py") },
-        @{ Source = (Join-Path $ProductRoot "tools\port_manager.py"); Payload = (Join-Path $InstallerRoot "payload\tools\port_manager.py") }
+        @{ Source = (Join-Path $ProductRoot "tools\port_manager.py"); Payload = (Join-Path $InstallerRoot "payload\tools\port_manager.py") },
+        @{ Source = (Join-Path $ProductRoot "winkey-emulator\winkey_emulator.py"); Payload = (Join-Path $InstallerRoot "payload\winkey-emulator\winkey_emulator.py") },
+        @{ Source = (Join-Path $ProductRoot "winkey-emulator\winkey_service.py"); Payload = (Join-Path $InstallerRoot "payload\winkey-emulator\winkey_service.py") },
+        @{ Source = (Join-Path $ProductRoot "winkey-emulator\run-winkey-emulator.ps1"); Payload = (Join-Path $InstallerRoot "payload\winkey-emulator\run-winkey-emulator.ps1") }
     )
 
     foreach ($pair in $pairs) {
