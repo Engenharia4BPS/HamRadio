@@ -217,6 +217,49 @@ Vector:     COM101 em diante
 
 Portas ocupadas/reservadas sao puladas. Instalacoes existentes preservam COMs legadas quando validas.
 
+## Perfil de cliente de rede CAT + WinKey
+
+Arquivo:
+
+```text
+installer\network-client\setup-network-client.ps1
+```
+
+Esse perfil e destinado a uma maquina N1MM que acessa uma estacao por rede,
+sem interface de radio nem porta de keying fisica local. Ele nao usa o Port
+Manager: provisiona explicitamente dois pares com0com e recusa sobrescrever
+uma instalacao Vector desconhecida.
+
+```text
+N1MM CAT COM15    <-> COM101  Vector Hub        -> rigctld remoto
+N1MM WinKey COM19 <-> COM108  WinKey Emulator   -> rigctld remoto
+```
+
+Primeiro rode Preview, com o `rigctld` remoto ja acessivel por LAN/VPN:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\network-client\setup-network-client.ps1 `
+  -RigHost 192.168.1.50
+```
+
+Depois execute o mesmo comando com `-Apply`. A primeira execucao pode pedir
+reboot apos criar os pares COM; depois do reboot, repita o mesmo `-Apply`.
+Por seguranca, WinKey inicia sem RF. Apos validar CAT e handshake N1MM, rode
+novamente com `-EnableWinKeyTransmit` para habilitar envio CW.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\network-client\setup-network-client.ps1 `
+  -RigHost 192.168.1.50 `
+  -EnableWinKeyTransmit `
+  -Apply
+```
+
+O perfil fixa `abort_mode = none`, porque o backend TS-2000 validado nao
+interrompe `stop_morse` de forma segura. `Esc` limpa o estado local, mas o
+texto ja recebido pelo keyer remoto termina normalmente.
+
 ---
 
 # D6 — Post-install / commissioning
