@@ -112,6 +112,7 @@ class Settings:
     rig_host: str
     rig_port: int
     rig_timeout_seconds: float
+    abort_mode: str
     allow_transmit: bool
     log_text: bool
     protocol_trace: bool
@@ -150,6 +151,9 @@ def load_settings(path: Path) -> Settings:
     rig_host = rig.get("host", "").strip()
     if not rig_host:
         raise ValueError("[rigctld] host must not be empty")
+    abort_mode = rig.get("abort_mode", "none").strip().lower()
+    if abort_mode not in {"none", "stop_morse"}:
+        raise ValueError("[rigctld] abort_mode must be 'none' or 'stop_morse'")
 
     return Settings(
         serial_port=port,
@@ -163,6 +167,7 @@ def load_settings(path: Path) -> Settings:
         rig_host=rig_host,
         rig_port=_bounded_int(rig, "port", 1, 65535),
         rig_timeout_seconds=timeout_ms / 1000.0,
+        abort_mode=abort_mode,
         allow_transmit=safety.getboolean("allow_transmit", False),
         log_text=logging_settings.getboolean("log_text", True),
         protocol_trace=logging_settings.getboolean("protocol_trace", False),
@@ -264,6 +269,11 @@ class RigctldMorseBridge:
             remote_message_active = now < self._busy_until
             self._busy_until = 0.0
         LOG.info("CW abort requested: %s", reason)
+        if self.settings.abort_mode == "none":
+            with self._activity_lock:
+                self._remote_activity = False
+            LOG.info("Remote CW abort disabled: radio will finish any text already queued")
+            return
         if not self.settings.allow_transmit:
             LOG.info("TX disabled: would send rigctld stop_morse (0xbb)")
             return
@@ -675,7 +685,13 @@ def run(settings: Settings) -> int:
         port = serial.Serial(settings.serial_port, settings.serial_baud, timeout=0.02, write_timeout=1)
         protocol = WinKeyProtocol(settings, bridge, port.write)
         LOG.info("WinKey emulator ready on %s @ %d", settings.serial_port, settings.serial_baud)
-        LOG.info("rigctld target: %s:%d; transmit=%s", settings.rig_host, settings.rig_port, settings.allow_transmit)
+        LOG.info(
+            "rigctld target: %s:%d; transmit=%s; abort=%s",
+            settings.rig_host,
+            settings.rig_port,
+            settings.allow_transmit,
+            settings.abort_mode,
+        )
         while True:
             data = port.read(256)
             for value in data:
@@ -711,7 +727,7 @@ def main() -> int:
     if args.check:
         print(
             f"CONFIG_OK port={settings.serial_port} rigctld={settings.rig_host}:{settings.rig_port} "
-            f"allow_transmit={settings.allow_transmit}"
+            f"allow_transmit={settings.allow_transmit} abort_mode={settings.abort_mode}"
         )
         return 0
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
