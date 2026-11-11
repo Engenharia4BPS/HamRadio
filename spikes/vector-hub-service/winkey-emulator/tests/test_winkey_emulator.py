@@ -14,7 +14,7 @@ def settings(**overrides):
         serial_port="COM140", serial_baud=1200, text_gap_seconds=0.015,
         max_message_chars=240, firmware_revision=23, initial_wpm=28,
         min_wpm=5, max_wpm=99, rig_host="127.0.0.1", rig_port=4532,
-        rig_timeout_seconds=1.5, allow_transmit=False, log_text=True, protocol_trace=False,
+        rig_timeout_seconds=1.5, abort_mode="none", allow_transmit=False, log_text=True, protocol_trace=False,
     )
     values.update(overrides)
     return Settings(**values)
