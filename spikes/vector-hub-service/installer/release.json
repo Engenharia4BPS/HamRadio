@@ -1,9 +1,9 @@
 {
   "product": "GADX Vector",
-  "version": "0.8.0-dev.38",
-  "phase": "D8G",
+  "version": "0.8.0-dev.39",
+  "phase": "D8H",
   "channel": "development",
-  "baseline": "D8G-com0com-code52-detection-2026-09-28",
+  "baseline": "D8H-network-cat-winkey-client-2026-11-10",
   "repository": "Engenharia4BPS/HamRadio",
   "path": "spikes/vector-hub-service",
   "supported_windows": [
