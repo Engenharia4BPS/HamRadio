@@ -25,7 +25,8 @@ Implementado:
 - handshake WinKey usado pelo N1MM: `ADMIN/ECHO` e `ADMIN/OPEN`, com revisão WK2 configurável;
 - texto ASCII buffered, agrupado após `15 ms` de silêncio por padrão, em um único `b TEXTO`;
 - velocidade WinKey imediata, buffered e `Load Defaults`, em `L KEYSPD <WPM>`;
-- `CLEAR BUFFER` (`0x0A`), `PAUSE` e fim da sessão em `0xbb` (`stop_morse`) somente enquanto houver CW ainda em andamento;
+- `CLEAR BUFFER` (`0x0A`), `PAUSE` e fim da sessão limpam o estado WinKey local; por padrão não interrompem texto já aceito pelo keyer remoto;
+- `stop_morse` (`0xbb`) pode ser habilitado explicitamente apenas para backends em que tenha sido validado sem efeitos espúrios;
 - consultas de status e speed-pot suficientes para o handshake; o bit `BUSY` é estimado a partir do texto/WPM;
 - eventos WinKey de `BUSY`/idle e, quando o N1MM habilita esse modo, eco serial de cada caractere segundo temporização Morse estimada;
 - comandos de ponteiro que o N1MM usa antes de mensagens com alteração buffered de velocidade;
@@ -66,7 +67,7 @@ O N1MM documenta que um emulador WinKey recebe caracteres ASCII e é adequado pa
    C:\Ham\GADX-WinKey-Emulator
    ```
 
-4. Copie `winkey.ini.example` para `winkey.ini`. Ajuste somente a porta `COM140` e, se necessário, `[rigctld] host`/`port`. Mantenha `allow_transmit = false` nesta primeira partida.
+4. Copie `winkey.ini.example` para `winkey.ini`. Ajuste somente a porta `COM140` e, se necessário, `[rigctld] host`/`port`. Mantenha `allow_transmit = false` nesta primeira partida. O padrão `abort_mode = none` evita enviar abort remoto automaticamente.
 
 5. Verifique apenas a configuração:
 
@@ -103,7 +104,7 @@ CW speed -> 28 WPM
 CW text -> 'TEST'
 ```
 
-Teste `Esc` no N1MM durante uma mensagem mais longa: o log deve indicar `CW abort requested` e enviar `0xbb` ao rigctld.
+No padrão `abort_mode = none`, `Esc` limpa a fila local do N1MM, mas texto já entregue ao keyer interno do rádio termina normalmente. Não envie uma nova macro até esse texto acabar. Só use `abort_mode = stop_morse` em um rádio/backend onde o comando `0xbb` tenha sido validado para realmente interromper CW sem transmitir caracteres extras.
 
 ## Plano de validação e critérios de aceite
 
@@ -115,13 +116,13 @@ Teste `Esc` no N1MM durante uma mensagem mais longa: o log deve indicar `CW abor
 | 3 | Mudar WPM na interface N1MM | `CW speed -> <WPM>` no log | Nenhum `L KEYSPD` é enviado |
 | 4 | Confirmar host/porta do rigctld e habilitar `allow_transmit=true` | apenas depois de revisão manual | Opt-in explícito |
 | 5 | Enviar `TEST` em carga/frequência de teste | rigctld recebe `L KEYSPD` e `b TEST`; rádio gera CW | Vector continua ativo e sem alteração |
-| 6 | Iniciar mensagem longa e pressionar `Esc` | `0xbb` interrompe o CW remoto | Não toca RTS/DTR do Vector |
-| 7 | Fechar o emulador (`Ctrl+C`) durante um envio | `0xbb` best-effort; processo encerra | Serviço e INI do Vector intactos |
+| 6 | Iniciar mensagem longa e pressionar `Esc` | Estado WinKey local volta a idle; rádio termina texto já aceito | Não toca RTS/DTR do Vector |
+| 7 | Fechar o emulador (`Ctrl+C`) durante um envio | Processo encerra sem enviar abort remoto no modo padrão | Serviço e INI do Vector intactos |
 | 8 | Retornar N1MM à COM/método de CW anterior | CW físico original funciona como antes | Rollback sem instalação |
 
 ## Rollback
 
-1. Feche o emulador (`Ctrl+C`). Se houver CW em andamento, solicita `stop_morse` como medida de segurança; depois do término, não envia um abort tardio ao rigctld.
+1. Feche o emulador (`Ctrl+C`). No modo padrão, ele não envia abort remoto; qualquer texto já presente no keyer interno do rádio termina normalmente.
 2. No N1MM, desmarque WinKey/COM40 ou retorne à porta CW anterior.
 3. Se desejar, rode `setupc.exe list`, confirme o índice do par `COM40 <-> COM140` e remova somente esse índice com `setupc.exe remove <índice>`. Não use o Port Manager para remover este par independente.
 4. Apague `C:\Ham\GADX-WinKey-Emulator`.
@@ -137,7 +138,7 @@ Sem rádio e sem COM física:
   -m unittest discover -s C:\Ham\GADX-WinKey-Emulator\tests -v
 ```
 
-Os testes cobrem o handshake, batch ASCII, WPM/KEYSPD, `CLEAR BUFFER`/abort, status, bloco `Load Defaults` e a emissão exata de `L KEYSPD`, `b TEXTO` e `0xbb` contra um rigctld simulado.
+Os testes cobrem o handshake, batch ASCII, WPM/KEYSPD, `CLEAR BUFFER`, status, bloco `Load Defaults`, a opção segura de abort local e a emissão opt-in de `L KEYSPD`, `b TEXTO` e `0xbb` contra um rigctld simulado.
 
 ## Diagnóstico sem RF
 
