@@ -65,6 +65,23 @@ spikes/vector-hub-service/
 
 Ele nao faz parte do `GADXVectorHub`, do Windows Service nem do instalador D1-D8. Em particular, nao le/escreve `vector.ini`, nao abre a COM fisica de keying e nao altera o fluxo CAT/PTT/CW/FSK validado. O roteiro de instalacao, validacao com N1MM e rollback fica em [`winkey-emulator/README.md`](winkey-emulator/README.md).
 
+## Cliente de rede CAT + WinKey
+
+Para uma maquina N1MM sem radio/COM fisica local, o perfil
+[`installer/network-client/setup-network-client.ps1`](installer/network-client/setup-network-client.ps1)
+instala os dois componentes juntos:
+
+```text
+N1MM CAT COM15       <-> COM101  GADX Vector Hub  <-> rigctld remoto
+N1MM WinKey COM19    <-> COM108  GADX WinKey      <-> rigctld remoto
+```
+
+O perfil nunca abre uma porta fisica de keying na maquina cliente; PTT e CW
+fisicos ficam desativados no `vector.ini`. Ele instala os servicos
+`GADXVectorHub` e `GADXWinKeyEmulator`, cria somente esses dois pares COM e
+exige que o `rigctld` remoto esteja acessivel por LAN ou VPN. O endereco do
+rigctld e um parametro de instalacao, nao fica gravado no pacote.
+
 ---
 
 ## Arquitetura consolidada
