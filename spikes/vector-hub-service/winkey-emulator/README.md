@@ -87,6 +87,14 @@ O N1MM documenta que um emulador WinKey recebe caracteres ASCII e é adequado pa
 
    O script reutiliza somente o Python privado já instalado pelo Vector (`C:\Ham\GADX-Vector\runtime\python.exe`). Não instala bibliotecas nem registra serviço.
 
+## Inicialização automática (perfil de rede)
+
+Quando instalado pelo perfil `installer/network-client`, o emulador roda como
+o serviço Windows `GADXWinKeyEmulator`, separado do `GADXVectorHub`. O log fica
+em `C:\Ham\GADX-Vector\logs\winkey-emulator.log`. O serviço abre somente a
+COM WinKey dedicada e usa o `winkey.ini` separado; ele nunca abre a COM física
+de keying nem altera `vector.ini`.
+
 ## Configuração e validação no N1MM
 
 No **Config > Configure Ports, Mode Control, Winkey, etc.**:
